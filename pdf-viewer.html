@@ -303,9 +303,34 @@
     $("#rn").value = f ? f.name.slice(0, f.name.length - extOf(f.name).length) : "";
     $("#ext").textContent = f ? extOf(f.name) : "";
     if (f && !f.h) rmsg(dirNote ? "無法改名，因為瀏覽器沒有給改名權限。原因：" + dirNote + "。若是系統資料夾（桌面、文件、下載）請改選它底下的子資料夾。" : "這個檔案不是用「選擇資料夾」按鈕開啟的，無法改名。", !!dirNote);
-    else if (f) rmsg(f.h.parent ? "輸入新檔名後按 Enter：改名並跳到下一個。按 F2 可快速移到檔名欄。" : "這是單獨加入的檔案，第一次改名時瀏覽器會針對這個檔案詢問一次，請點「儲存變更」。要一次改很多檔案，建議拖整個資料夾，只會問一次。", false);
+    else if (f) rmsg(f.h.parent ? "輸入新檔名後按 Enter：改名並跳到下一個。按 F2 可快速移到檔名欄。" : "這是單獨加入的檔案。第一次改名時，請在跳出的視窗選「這個檔案所在的資料夾」並點「儲存變更」，之後同一個資料夾的檔案就不會再問。直接拖整個資料夾則完全不用選。", false);
   }
-  /* 單獨加入的檔案：沒有資料夾控制權，直接對檔案本身改名（Chrome / Edge 支援） */
+  /* 單獨加入的檔案：瀏覽器不給直接改名，改成請使用者選一次「檔案所在的資料夾」，之後同資料夾不再詢問 */
+  var knownDirs = [];
+  async function attachParent(f) {
+    if (f.h.parent) return;
+    var h = f.h.handle, par = null;
+    async function descend(root) {
+      var r = await root.resolve(h); if (!r) return null;
+      var d = root; for (var i = 0; i < r.length - 1; i++) d = await d.getDirectoryHandle(r[i]);
+      return d;
+    }
+    for (var kd of knownDirs) { try { par = await descend(kd); if (par) break; } catch (e) {} }
+    if (!par) {
+      if (!window.showDirectoryPicker) throw new Error("這個瀏覽器無法改單獨檔案的名稱，請改拖整個資料夾");
+      var root;
+      try { root = await window.showDirectoryPicker({ mode: "readwrite", startIn: h }); }
+      catch (e) {
+        if (e && e.name === "AbortError") throw new Error("沒有選資料夾，所以無法改名。請選這個檔案所在的資料夾，並點「儲存變更」");
+        root = await window.showDirectoryPicker({ mode: "readwrite" });
+      }
+      par = await descend(root);
+      if (!par) throw new Error("你選的資料夾裡找不到這個檔案，請選這個檔案所在的資料夾");
+      knownDirs.push(root);
+    }
+    f.h = { parent: par, handle: await par.getFileHandle(f.name) };
+  }
+  /* （舊做法，保留備用）直接對單一檔案改名 */
   async function renameSingle(f, newName) {
     var h = f.h.handle, oldName = f.name;
     if (typeof h.move !== "function") throw new Error("這個瀏覽器版本不支援直接改單一檔案的名稱，請改拖整個資料夾");
@@ -331,7 +356,7 @@
     return cand;
   }
   async function doRename(f, newName) {
-    if (!f.h.parent) return renameSingle(f, newName);
+    if (!f.h.parent) throw new Error("找不到這個檔案所在的資料夾");
     var parent = f.h.parent, oldName = f.name;
     var caseOnly = newName.toLowerCase() === oldName.toLowerCase();
     if (!caseOnly) {
@@ -385,6 +410,7 @@
     renaming = true;
     try {
       var old = f.name, asked = newName;
+      await attachParent(f);
       newName = await uniqueName(f, newName);
       newName = await doRename(f, newName);
       undoStack.push({ id: f.id, oldName: old, newName: newName });
