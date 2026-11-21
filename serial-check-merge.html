@@ -111,17 +111,7 @@
   </section>
 
   <section>
-    <h2>2. 加入檔案</h2>
-    <div id="drop" tabindex="0" role="button" aria-label="選擇或拖曳 PDF 檔案">
-      <strong>把 PDF 拖到這裡，或點擊選擇</strong>
-      <span>可分次加入；也支援 JPG、PNG（每張一頁）</span>
-    </div>
-    <input id="file" type="file" accept="application/pdf,image/jpeg,image/png" multiple hidden>
-    <ul id="flist"></ul>
-  </section>
-
-  <section>
-    <h2>3. 核對結果</h2>
+    <h2>2. 核對結果</h2>
     <div class="stats" id="stats"></div>
     <div class="legend">
       <span><i class="sw" style="color:var(--have);background:var(--have-bg)"></i>已有檔案</span>
@@ -138,6 +128,21 @@
     <div class="row" style="margin-top:10px">
       <button id="copyMiss">複製缺號清單</button>
     </div>
+  </section>
+
+  <section>
+    <h2>3. 加入檔案</h2>
+    <div id="drop" tabindex="0" role="button" aria-label="選擇或拖曳 PDF 檔案">
+      <strong>把整個資料夾或 PDF 拖到這裡</strong>
+      <span>點擊這裡可選檔案；也支援 JPG、PNG（每張一頁）</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="pickDir" type="button">選擇資料夾</button>
+      <span class="hint" style="align-self:center">資料夾內的子資料夾也會一起讀取。載入資料夾會取代目前的清單，補檔案後再拖一次即可更新。</span>
+    </div>
+    <input id="file" type="file" accept="application/pdf,image/jpeg,image/png" multiple hidden>
+    <input id="dirIn" type="file" webkitdirectory multiple hidden>
+    <ul id="flist"></ul>
   </section>
 
   <section>
@@ -234,8 +239,9 @@
 
   function reserial() { files.forEach(function (f) { f.serial = extract(f.name); }); }
 
-  async function addFiles(list) {
+  async function addFiles(list, replace, label) {
     hide();
+    if (replace) files = [];
     var bad = [];
     for (var f of Array.from(list)) {
       var img = /^image\/(jpeg|png)$/.test(f.type), pdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
@@ -253,8 +259,56 @@
       } catch (e) { bad.push(f.name + "（無法讀取，可能需要開啟密碼或檔案損毀）"); }
     }
     render();
-    if (bad.length) show("以下檔案未加入：" + bad.join("、"), true);
+    if (bad.length) show((label ? "已載入資料夾「" + label + "」，但" : "") + "以下檔案未加入：" + bad.join("、"), true);
+    else if (label) show("已載入資料夾「" + label + "」：" + files.length + " 個檔案。");
   }
+
+  /* ---------- 資料夾讀取 ---------- */
+  var MEDIA = /\.(pdf|jpe?g|png)$/i;
+  async function walkDir(dir, out) {
+    for await (var ent of dir.values()) {
+      try {
+        if (ent.kind === "file") { if (MEDIA.test(ent.name)) out.push(await ent.getFile()); }
+        else await walkDir(ent, out);
+      } catch (e) { skippedN++; }
+    }
+  }
+  var skippedN = 0;
+  function entryFile(en) { return new Promise(function (ok, no) { en.file(ok, no); }); }
+  function readAll(reader) {
+    return new Promise(function (ok, no) {
+      var all = [];
+      (function next() { reader.readEntries(function (b) { if (!b.length) ok(all); else { all = all.concat(Array.from(b)); next(); } }, no); })();
+    });
+  }
+  async function walkEntry(en, out) {
+    try {
+      if (en.isFile) { if (MEDIA.test(en.name)) out.push(await entryFile(en)); }
+      else if (en.isDirectory) { for (var k of await readAll(en.createReader())) await walkEntry(k, out); }
+    } catch (e) { skippedN++; }
+  }
+  function skipNote() { return skippedN ? "（有 " + skippedN + " 個檔案讀不到，已略過）" : ""; }
+
+  $("#pickDir").addEventListener("click", async function () {
+    if (window.showDirectoryPicker) {
+      try {
+        var dir = await window.showDirectoryPicker();
+        skippedN = 0; var out = []; await walkDir(dir, out);
+        await addFiles(out, true, dir.name);
+        if (skippedN) show($("#msg").textContent + skipNote(), true);
+        return;
+      } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    $("#dirIn").click();
+  });
+  $("#dirIn").addEventListener("change", function () {
+    var list = Array.from(this.files).filter(function (f) { return MEDIA.test(f.name); });
+    var label = this.files.length && this.files[0].webkitRelativePath ? this.files[0].webkitRelativePath.split("/")[0] : "";
+    if (!this.files.length) show("瀏覽器沒有回傳任何檔案，請改用拖曳資料夾。", true);
+    else if (!list.length) show("這個資料夾裡沒有 PDF、JPG 或 PNG 檔案。", true);
+    else addFiles(list, true, label || "資料夾");
+    this.value = "";
+  });
 
   function render() {
     var c = cfg();
@@ -279,9 +333,10 @@
     $("#stats").innerHTML = '<span>範圍共 <b>' + total + '</b> 個</span><span>有檔案 <b>' + haveN + '</b></span>' +
       '<span>手動勾選 <b>' + tickN + '</b></span><span>缺少 <b>' + missing.length + '</b></span>';
     var mb = $("#missbox");
-    if (missing.length) { mb.className = "missbox"; mb.textContent = rangeText(missing, c.pad); }
+    if (!files.length) { mb.className = "missbox"; mb.textContent = "還沒有加入檔案。請在下方「加入檔案」拖入資料夾或 PDF，這裡就會列出缺少的流水號。"; }
+    else if (missing.length) { mb.className = "missbox"; mb.textContent = rangeText(missing, c.pad); }
     else { mb.className = "missbox ok"; mb.textContent = "沒有缺號，全部都齊了。"; }
-    mb.dataset.text = missing.length ? rangeText(missing, c.pad) : "";
+    mb.dataset.text = missing.length && files.length ? rangeText(missing, c.pad) : "";
     $("#exTxt").textContent = files.length ? "" : "例如檔名「合約_" + fmt(c.a, c.pad) + ".pdf」會被辨識為流水號 " + fmt(c.a, c.pad) + "。";
     renderFiles(c);
     $("#go").disabled = !files.some(function (f) { return f.serial !== null && f.serial >= c.a && f.serial <= c.b; });
@@ -342,7 +397,38 @@
   input.addEventListener("change", function () { addFiles(input.files); input.value = ""; });
   ["dragenter", "dragover"].forEach(function (n) { drop.addEventListener(n, function (e) { e.preventDefault(); drop.classList.add("over"); }); });
   ["dragleave", "drop"].forEach(function (n) { drop.addEventListener(n, function () { drop.classList.remove("over"); }); });
-  drop.addEventListener("drop", function (e) { e.preventDefault(); addFiles(e.dataTransfer.files); });
+  drop.addEventListener("drop", async function (e) {
+    e.preventDefault();
+    var dt = e.dataTransfer, ents = [];
+    /* 必須在 await 之前同步取得 */
+    var hps = dt.items ? Array.from(dt.items).map(function (it) {
+      return it.kind === "file" && it.getAsFileSystemHandle ? it.getAsFileSystemHandle().catch(function () { return null; }) : null;
+    }) : [];
+    if (dt.items) Array.from(dt.items).forEach(function (it) { var en = it.webkitGetAsEntry && it.webkitGetAsEntry(); if (en) ents.push(en); });
+    var plain = Array.from(dt.files);
+    skippedN = 0;
+    var hs = (await Promise.all(hps)).filter(Boolean);
+    var dirs = hs.filter(function (h) { return h.kind === "directory"; });
+    if (dirs.length) {
+      try {
+        show("讀取資料夾中…");
+        var out = []; for (var d of dirs) await walkDir(d, out);
+        for (var h of hs) if (h.kind === "file" && MEDIA.test(h.name)) out.push(await h.getFile());
+        await addFiles(out, true, dirs.map(function (x) { return x.name; }).join("、"));
+        if (skippedN) show($("#msg").textContent + skipNote(), true);
+        return;
+      } catch (err) { skippedN = 0; }
+    }
+    if (ents.some(function (en) { return en.isDirectory; })) {
+      try {
+        show("讀取資料夾中…");
+        var out2 = []; for (var en of ents) await walkEntry(en, out2);
+        var nm = ents.filter(function (x) { return x.isDirectory; }).map(function (x) { return x.name; }).join("、");
+        await addFiles(out2, true, nm);
+        if (skippedN) show($("#msg").textContent + skipNote(), true);
+      } catch (err) { show("讀取資料夾失敗：" + ((err && (err.name + " " + err.message)) || String(err)), true); }
+    } else if (plain.length) addFiles(plain);
+  });
   window.addEventListener("dragover", function (e) { e.preventDefault(); });
   window.addEventListener("drop", function (e) { if (!drop.contains(e.target)) e.preventDefault(); });
 

@@ -86,10 +86,15 @@
   <p class="sub">檔案只在你的瀏覽器內處理，不會上傳到任何地方。</p>
 
   <div id="drop" tabindex="0" role="button" aria-label="選擇或拖曳 PDF 檔案">
-    <strong>把 PDF 拖到這裡，或點擊選擇檔案</strong>
-    <span>可一次選多個檔案，也支援 JPG、PNG 圖片（每張一頁）</span>
+    <strong>把整個資料夾或 PDF 拖到這裡</strong>
+    <span>點擊這裡可選檔案，也支援 JPG、PNG 圖片（每張一頁）</span>
+  </div>
+  <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <button id="pickDir" type="button">選擇資料夾</button>
+    <span class="hint" style="margin:0">資料夾內的子資料夾也會一起讀取，檔案依檔名排序後加入清單。</span>
   </div>
   <input id="file" type="file" accept="application/pdf,image/jpeg,image/png" multiple hidden>
+  <input id="dirIn" type="file" webkitdirectory multiple hidden>
 
   <ul id="list"></ul>
 
@@ -128,7 +133,7 @@
   function show(text, err) { msg.textContent = text; msg.className = "show" + (err ? " err" : ""); }
   function hide() { msg.className = ""; }
 
-  async function addFiles(files) {
+  async function addFiles(files, label) {
     hide();
     var failed = [];
     for (var f of Array.from(files)) {
@@ -152,8 +157,57 @@
       }
     }
     render();
-    if (failed.length) show("以下檔案未加入：" + failed.join("、"), true);
+    if (failed.length) show((label ? "已加入資料夾「" + label + "」，但" : "") + "以下檔案未加入：" + failed.join("、"), true);
+    else if (label) show("已加入資料夾「" + label + "」的檔案，目前共 " + items.length + " 個。");
   }
+
+  /* ---------- 資料夾讀取 ---------- */
+  var MEDIA = /\.(pdf|jpe?g|png)$/i, skippedN = 0;
+  function natural(a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); }
+  async function walkDir(dir, out) {
+    for await (var ent of dir.values()) {
+      try {
+        if (ent.kind === "file") { if (MEDIA.test(ent.name)) out.push(await ent.getFile()); }
+        else await walkDir(ent, out);
+      } catch (e) { skippedN++; }
+    }
+  }
+  function entryFile(en) { return new Promise(function (ok, no) { en.file(ok, no); }); }
+  function readAll(reader) {
+    return new Promise(function (ok, no) {
+      var all = [];
+      (function next() { reader.readEntries(function (b) { if (!b.length) ok(all); else { all = all.concat(Array.from(b)); next(); } }, no); })();
+    });
+  }
+  async function walkEntry(en, out) {
+    try {
+      if (en.isFile) { if (MEDIA.test(en.name)) out.push(await entryFile(en)); }
+      else if (en.isDirectory) { for (var k of await readAll(en.createReader())) await walkEntry(k, out); }
+    } catch (e) { skippedN++; }
+  }
+  async function addFolder(out, label) {
+    out.sort(natural);
+    await addFiles(out, label);
+    if (skippedN) show(msg.textContent + "（有 " + skippedN + " 個檔案讀不到，已略過）", true);
+  }
+  $("#pickDir").addEventListener("click", async function () {
+    if (window.showDirectoryPicker) {
+      try {
+        var dir = await window.showDirectoryPicker();
+        skippedN = 0; var out = []; await walkDir(dir, out);
+        await addFolder(out, dir.name); return;
+      } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    $("#dirIn").click();
+  });
+  $("#dirIn").addEventListener("change", function () {
+    var all = Array.from(this.files), list = all.filter(function (f) { return MEDIA.test(f.name); });
+    var label = all.length && all[0].webkitRelativePath ? all[0].webkitRelativePath.split("/")[0] : "資料夾";
+    if (!all.length) show("瀏覽器沒有回傳任何檔案，請改用拖曳資料夾。", true);
+    else if (!list.length) show("這個資料夾裡沒有 PDF、JPG 或 PNG 檔案。", true);
+    else { skippedN = 0; addFolder(list, label); }
+    this.value = "";
+  });
 
   function parseRange(text, pages) {
     text = text.trim();
@@ -269,7 +323,36 @@
     drop.addEventListener(n, function (e) { if (dragId !== null) return; e.preventDefault(); drop.classList.add("over"); });
   });
   ["dragleave", "drop"].forEach(function (n) { drop.addEventListener(n, function () { drop.classList.remove("over"); }); });
-  drop.addEventListener("drop", function (e) { if (dragId !== null) return; e.preventDefault(); addFiles(e.dataTransfer.files); });
+  drop.addEventListener("drop", async function (e) {
+    if (dragId !== null) return;
+    e.preventDefault();
+    var dt = e.dataTransfer, ents = [];
+    /* 必須在 await 之前同步取得 */
+    var hps = dt.items ? Array.from(dt.items).map(function (it) {
+      return it.kind === "file" && it.getAsFileSystemHandle ? it.getAsFileSystemHandle().catch(function () { return null; }) : null;
+    }) : [];
+    if (dt.items) Array.from(dt.items).forEach(function (it) { var en = it.webkitGetAsEntry && it.webkitGetAsEntry(); if (en) ents.push(en); });
+    var plain = Array.from(dt.files);
+    skippedN = 0;
+    var hs = (await Promise.all(hps)).filter(Boolean);
+    var dirs = hs.filter(function (h) { return h.kind === "directory"; });
+    if (dirs.length) {
+      try {
+        show("讀取資料夾中…");
+        var out = []; for (var d of dirs) await walkDir(d, out);
+        for (var h of hs) if (h.kind === "file" && MEDIA.test(h.name)) out.push(await h.getFile());
+        await addFolder(out, dirs.map(function (x) { return x.name; }).join("、"));
+        return;
+      } catch (err) { skippedN = 0; }
+    }
+    if (ents.some(function (en) { return en.isDirectory; })) {
+      try {
+        show("讀取資料夾中…");
+        var out2 = []; for (var en of ents) await walkEntry(en, out2);
+        await addFolder(out2, ents.filter(function (x) { return x.isDirectory; }).map(function (x) { return x.name; }).join("、"));
+      } catch (err) { show("讀取資料夾失敗：" + ((err && (err.name + " " + err.message)) || String(err)), true); }
+    } else if (plain.length) addFiles(plain);
+  });
   // 避免拖曳到頁面其他位置時瀏覽器直接開啟檔案
   window.addEventListener("dragover", function (e) { e.preventDefault(); });
   window.addEventListener("drop", function (e) { if (!drop.contains(e.target)) e.preventDefault(); });
