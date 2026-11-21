@@ -303,9 +303,35 @@
     $("#rn").value = f ? f.name.slice(0, f.name.length - extOf(f.name).length) : "";
     $("#ext").textContent = f ? extOf(f.name) : "";
     if (f && !f.h) rmsg(dirNote ? "無法改名，因為瀏覽器沒有給改名權限。原因：" + dirNote + "。若是系統資料夾（桌面、文件、下載）請改選它底下的子資料夾。" : "這個檔案不是用「選擇資料夾」按鈕開啟的，無法改名。", !!dirNote);
-    else if (f) rmsg("輸入新檔名後按 Enter：改名並跳到下一個。按 F2 可快速移到檔名欄。", false);
+    else if (f) rmsg(f.h.parent ? "輸入新檔名後按 Enter：改名並跳到下一個。按 F2 可快速移到檔名欄。" : "這是單獨加入的檔案，第一次改名時瀏覽器會針對這個檔案詢問一次，請點「儲存變更」。要一次改很多檔案，建議拖整個資料夾，只會問一次。", false);
+  }
+  /* 單獨加入的檔案：沒有資料夾控制權，直接對檔案本身改名（Chrome / Edge 支援） */
+  async function renameSingle(f, newName) {
+    var h = f.h.handle, oldName = f.name;
+    if (typeof h.move !== "function") throw new Error("這個瀏覽器版本不支援直接改單一檔案的名稱，請改拖整個資料夾");
+    if (h.requestPermission) {
+      var st = await h.requestPermission({ mode: "readwrite" });
+      if (st !== "granted") throw new Error("你沒有在瀏覽器提示中點「儲存變更」，所以無法改名");
+    }
+    var ext = extOf(newName), stem = newName.slice(0, newName.length - ext.length), cand = newName, n = 0;
+    var caseOnly = newName.toLowerCase() === oldName.toLowerCase();
+    for (;;) {
+      try { await h.move(cand); break; }
+      catch (e) {
+        /* 同名檔案已存在時瀏覽器會拒絕覆蓋，改試 (1)、(2)… */
+        var clash = e && (e.name === "NoModificationAllowedError" || e.name === "InvalidModificationError" || e.name === "NotAllowedError" || e.name === "InvalidStateError");
+        if (caseOnly || !clash || n >= 30) throw new Error(clash ? "資料夾裡可能已有同名檔案，無法改名" : (e.message || e.name));
+        n++; cand = stem + " (" + n + ")" + ext;
+      }
+    }
+    f.file = await h.getFile();
+    f.path = f.path.slice(0, f.path.length - oldName.length) + cand;
+    f.name = cand;
+    files.sort(function (a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); });
+    return cand;
   }
   async function doRename(f, newName) {
+    if (!f.h.parent) return renameSingle(f, newName);
     var parent = f.h.parent, oldName = f.name;
     var caseOnly = newName.toLowerCase() === oldName.toLowerCase();
     if (!caseOnly) {
@@ -330,6 +356,7 @@
     f.path = f.path.slice(0, f.path.length - oldName.length) + newName;
     f.name = newName;
     files.sort(function (a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); });
+    return newName;
   }
   async function nameFree(parent, name) {
     try { await parent.getFileHandle(name); return false; }
@@ -337,7 +364,7 @@
   }
   /* 遇到同名時自動加上 (1)、(2)…，和瀏覽器下載的做法一樣 */
   async function uniqueName(f, name) {
-    if (name.toLowerCase() === f.name.toLowerCase()) return name;
+    if (!f.h.parent || name.toLowerCase() === f.name.toLowerCase()) return name;
     var ext = extOf(name), stem = name.slice(0, name.length - ext.length), cand = name, n = 0;
     while (!(await nameFree(f.h.parent, cand))) {
       if (++n > 9999) throw new Error("同名檔案太多，無法自動編號");
@@ -359,7 +386,7 @@
     try {
       var old = f.name, asked = newName;
       newName = await uniqueName(f, newName);
-      await doRename(f, newName);
+      newName = await doRename(f, newName);
       undoStack.push({ id: f.id, oldName: old, newName: newName });
       renderList(); $("#title").textContent = f.name;
       if (goNext && nextF) { await openFile(nextF.id); $("#rn").focus(); $("#rn").select(); }
@@ -421,7 +448,17 @@
     } else dirNote = "這個瀏覽器不支援改名功能（請改用 Chrome 或 Edge）";
     $("#dirIn").click();
   });
-  $("#pickFiles").addEventListener("click", function () { $("#fileIn").click(); });
+  $("#pickFiles").addEventListener("click", async function () {
+    if (window.showOpenFilePicker) {
+      try {
+        var fhs = await window.showOpenFilePicker({ multiple: true, types: [{ description: "PDF 檔案", accept: { "application/pdf": [".pdf"] } }] });
+        var fo = [];
+        for (var fh of fhs) { var ff = await fh.getFile(); hOf.set(ff, { parent: null, handle: fh }); fo.push(ff); }
+        addFiles(fo, false); return;
+      } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    $("#fileIn").click();
+  });
   $("#dirIn").addEventListener("change", function () {
     var n = this.files.length; addFiles(this.files, true);
     if (!n) $("#count").textContent = "瀏覽器沒有回傳任何檔案，可能被公司設定擋住；請改用「加入檔案」或直接拖曳。";
@@ -481,9 +518,9 @@
     /* 方法一：取得資料夾控制代碼，會跳出「編輯檔案」的允許提示，之後也能改名 */
     var hs = (await Promise.all(hps)).filter(Boolean);
     var dirs = hs.filter(function (h) { return h.kind === "directory"; });
-    if (dirs.length) {
+    if (hs.length) {
       try {
-        $("#count").textContent = "等待你在瀏覽器提示中按「允許」…";
+        $("#count").textContent = dirs.length ? "等待你在瀏覽器提示中點「儲存變更」…" : "讀取檔案中…";
         var granted = true;
         for (var d of dirs) {
           var st = d.requestPermission ? await d.requestPermission({ mode: "readwrite" }) : "denied";
@@ -492,7 +529,7 @@
         $("#count").textContent = "讀取資料夾中…";
         var out2 = []; noHandles = !granted;
         for (var d2 of dirs) await walk(d2, "", out2);
-        for (var h of hs) if (h.kind === "file" && /\.pdf$/i.test(h.name)) out2.push(await h.getFile());
+        for (var h of hs) if (h.kind === "file" && /\.pdf$/i.test(h.name)) { var hf = await h.getFile(); if (!noHandles) hOf.set(hf, { parent: null, handle: h }); out2.push(hf); }
         noHandles = false;
         addFiles(out2, false);
         if (!granted) { dirNote = "你在瀏覽器提示中沒有按「儲存變更」，所以只能預覽。要改名請重新拖一次，並在提示中點「儲存變更」"; setupRename(byId(curId)); }
