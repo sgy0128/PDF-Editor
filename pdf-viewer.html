@@ -78,6 +78,7 @@
   :root[data-theme="dark"] .theme-btn .i-moon, :root[data-theme="dark"] .theme-btn .lbl-dark { display: none; }
   .home { color: var(--muted); text-decoration: none; font-size: .88rem; }
   .home:hover { color: var(--accent); }
+  .permhint { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--fg); font-size: .82rem; line-height: 1.5; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 </style>
 </head>
@@ -94,6 +95,7 @@
       </div>
       <input id="q" type="search" placeholder="用檔名搜尋" aria-label="用檔名搜尋">
       <div class="count" id="count">尚未載入檔案</div>
+      <p class="permhint">要改檔名，需要先讓瀏覽器取得權限。按下「選擇資料夾」或拖入資料夾後，瀏覽器會跳出提示，請按<strong>「儲存變更」</strong>（這是 Chrome 的固定說法，意思是允許編輯這個資料夾裡的檔案）。瀏覽器預設會停在「取消」上，請用滑鼠點「儲存變更」，不要直接按 Enter。</p>
     </div>
     <ul id="list"></ul>
   </aside>
@@ -403,7 +405,10 @@
         var out = []; await walk(dir, "", out);
         addFiles(out, true); return;
       } catch (e) {
-        if (e && e.name === "AbortError") return;
+        if (e && e.name === "AbortError") {
+          $("#count").textContent = "沒有選到資料夾，或在瀏覽器提示中按了「取消」。請再按一次「選擇資料夾」，提示出現時請點「儲存變更」。";
+          return;
+        }
         dirNote = ((e && e.name) || "") + " " + ((e && e.message) || "");
       }
     } else dirNote = "這個瀏覽器不支援改名功能（請改用 Chrome 或 Edge）";
@@ -483,7 +488,7 @@
         for (var h of hs) if (h.kind === "file" && /\.pdf$/i.test(h.name)) out2.push(await h.getFile());
         noHandles = false;
         addFiles(out2, false);
-        if (!granted) { dirNote = "你沒有允許編輯檔案，所以只能預覽"; setupRename(byId(curId)); }
+        if (!granted) { dirNote = "你在瀏覽器提示中沒有按「儲存變更」，所以只能預覽。要改名請重新拖一次，並在提示中點「儲存變更」"; setupRename(byId(curId)); }
         return;
       } catch (err) { noHandles = false; /* 失敗就改用方法二 */ }
     }
