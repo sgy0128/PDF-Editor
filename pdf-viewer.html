@@ -86,6 +86,10 @@
   .home:hover, .home:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
   .home:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
   .permhint { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--fg); font-size: .82rem; line-height: 1.5; }
+  #toast { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); z-index: 99; max-width: min(92vw, 460px);
+    background: var(--panel); color: var(--fg); border: 2px solid var(--accent); border-radius: 10px; padding: 14px 16px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.3); line-height: 1.6; display: flex; gap: 12px; align-items: flex-start; }
+  #toast button { flex: none; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 </style>
 </head>
@@ -97,12 +101,12 @@
       <h1>PDF 預覽器</h1>
       <div class="btns">
         <button class="primary" id="pickDir">選擇資料夾</button>
-        <button id="pickFiles">加入檔案</button>
+        <button class="primary" id="pickFiles">加入檔案</button>
         <button id="clear">清空</button>
       </div>
       <input id="q" type="search" placeholder="用檔名搜尋" aria-label="用檔名搜尋">
       <div class="count" id="count">尚未載入檔案</div>
-      <p class="permhint">要改檔名，需要先讓瀏覽器取得權限。按下「選擇資料夾」或拖入資料夾後，瀏覽器會跳出提示，請按<strong>「儲存變更」</strong>（這是 Chrome 的固定說法，意思是允許編輯這個資料夾裡的檔案）。瀏覽器預設會停在「取消」上，請用滑鼠點「儲存變更」，不要直接按 Enter。</p>
+      <p class="permhint">要改檔名，需要先讓瀏覽器取得權限。按下「選擇資料夾」、「加入檔案」或拖入資料夾後，瀏覽器會跳出提示，請按<strong>「儲存變更」</strong>（這是 Chrome 的固定說法，意思是允許編輯這些檔案）。瀏覽器預設會停在「取消」上，請用滑鼠點「儲存變更」，不要直接按 Enter。</p>
     </div>
     <ul id="list"></ul>
   </aside>
@@ -110,7 +114,7 @@
     <div class="bar">
       <button id="prev" disabled>◀ 上一個</button>
       <button id="next" disabled>下一個 ▶</button>
-      <span class="title" id="title">請在左側選擇資料夾，或把 PDF 拖進來</span>
+      <span class="title" id="title">請在左側選擇資料夾、加入檔案，或把整個資料夾拖進來</span>
       <button id="zout" disabled aria-label="縮小">－</button>
       <span class="zoom" id="zoomTxt">—</span>
       <button id="zin" disabled aria-label="放大">＋</button>
@@ -125,13 +129,13 @@
       <button class="primary" id="rnGo" disabled>改名並到下一個</button>
       <button id="rnOnly" disabled>只改名</button>
       <button id="rnUndo" disabled>復原上一次</button>
-      <span class="muted" id="rnMsg">要改名，請用「選擇資料夾」按鈕開啟資料夾（Chrome 或 Edge）。</span>
+      <span class="muted" id="rnMsg">要改名，請用「選擇資料夾」或「加入檔案」按鈕開啟（Chrome 或 Edge）。</span>
     </div>
-    <div id="stage"><p class="empty">預覽在你的瀏覽器內完成，檔案不會上傳。<br>選好資料夾後，用 ↑ ↓ 鍵可以快速切換檔案。</p></div>
+    <div id="stage"><p class="empty">預覽在你的瀏覽器內完成，檔案不會上傳。<br>選好檔案或資料夾後，用 ↑ ↓ 鍵可以快速切換檔案。</p></div>
   </main>
 </div>
+<div id="toast" role="alert" hidden><span id="toastTxt"></span><button id="toastOk" class="primary">知道了</button></div>
 <input id="dirIn" type="file" webkitdirectory multiple hidden>
-<input id="fileIn" type="file" accept="application/pdf" multiple hidden>
 
 <script>
 (function () {
@@ -302,62 +306,19 @@
     $("#rnUndo").disabled = !undoStack.length;
     $("#rn").value = f ? f.name.slice(0, f.name.length - extOf(f.name).length) : "";
     $("#ext").textContent = f ? extOf(f.name) : "";
-    if (f && !f.h) rmsg(dirNote ? "無法改名，因為瀏覽器沒有給改名權限。原因：" + dirNote + "。若是系統資料夾（桌面、文件、下載）請改選它底下的子資料夾。" : "這個檔案不是用「選擇資料夾」按鈕開啟的，無法改名。", !!dirNote);
-    else if (f) rmsg(f.h.parent ? "輸入新檔名後按 Enter：改名並跳到下一個。按 F2 可快速移到檔名欄。" : "這是單獨加入的檔案。第一次改名時，請在跳出的視窗選「這個檔案所在的資料夾」並點「儲存變更」，之後同一個資料夾的檔案就不會再問。直接拖整個資料夾則完全不用選。", false);
-  }
-  /* 單獨加入的檔案：瀏覽器不給直接改名，改成請使用者選一次「檔案所在的資料夾」，之後同資料夾不再詢問 */
-  var knownDirs = [];
-  async function attachParent(f) {
-    if (f.h.parent) return;
-    var h = f.h.handle, par = null;
-    async function descend(root) {
-      var r = await root.resolve(h); if (!r) return null;
-      var d = root; for (var i = 0; i < r.length - 1; i++) d = await d.getDirectoryHandle(r[i]);
-      return d;
-    }
-    for (var kd of knownDirs) { try { par = await descend(kd); if (par) break; } catch (e) {} }
-    if (!par) {
-      if (!window.showDirectoryPicker) throw new Error("這個瀏覽器無法改單獨檔案的名稱，請改拖整個資料夾");
-      var root;
-      try { root = await window.showDirectoryPicker({ mode: "readwrite", startIn: h }); }
-      catch (e) {
-        if (e && e.name === "AbortError") throw new Error("沒有選資料夾，所以無法改名。請選這個檔案所在的資料夾，並點「儲存變更」");
-        root = await window.showDirectoryPicker({ mode: "readwrite" });
-      }
-      par = await descend(root);
-      if (!par) throw new Error("你選的資料夾裡找不到這個檔案，請選這個檔案所在的資料夾");
-      knownDirs.push(root);
-    }
-    f.h = { parent: par, handle: await par.getFileHandle(f.name) };
-  }
-  /* （舊做法，保留備用）直接對單一檔案改名 */
-  async function renameSingle(f, newName) {
-    var h = f.h.handle, oldName = f.name;
-    if (typeof h.move !== "function") throw new Error("這個瀏覽器版本不支援直接改單一檔案的名稱，請改拖整個資料夾");
-    if (h.requestPermission) {
-      var st = await h.requestPermission({ mode: "readwrite" });
-      if (st !== "granted") throw new Error("你沒有在瀏覽器提示中點「儲存變更」，所以無法改名");
-    }
-    var ext = extOf(newName), stem = newName.slice(0, newName.length - ext.length), cand = newName, n = 0;
-    var caseOnly = newName.toLowerCase() === oldName.toLowerCase();
-    for (;;) {
-      try { await h.move(cand); break; }
-      catch (e) {
-        /* 同名檔案已存在時瀏覽器會拒絕覆蓋，改試 (1)、(2)… */
-        var clash = e && (e.name === "NoModificationAllowedError" || e.name === "InvalidModificationError" || e.name === "NotAllowedError" || e.name === "InvalidStateError");
-        if (caseOnly || !clash || n >= 30) throw new Error(clash ? "資料夾裡可能已有同名檔案，無法改名" : (e.message || e.name));
-        n++; cand = stem + " (" + n + ")" + ext;
-      }
-    }
-    f.file = await h.getFile();
-    f.path = f.path.slice(0, f.path.length - oldName.length) + cand;
-    f.name = cand;
-    files.sort(function (a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); });
-    return cand;
+    if (f && !f.h) rmsg(dirNote ? "無法改名，因為瀏覽器沒有給改名權限。原因：" + dirNote + "。若是系統資料夾（桌面、文件、下載）請改選它底下的子資料夾。" : "這個檔案不是用「選擇資料夾」或「加入檔案」按鈕開啟的，無法改名。", !!dirNote);
+    else if (f) rmsg("輸入新檔名後按 Enter：改名並跳到下一個。按 F2 可快速移到檔名欄。", false);
   }
   async function doRename(f, newName) {
-    if (!f.h.parent) throw new Error("找不到這個檔案所在的資料夾");
     var parent = f.h.parent, oldName = f.name;
+    if (!parent) {
+      if (typeof f.h.handle.move !== "function") throw new Error("這個瀏覽器不支援改名單獨加入的檔案，請改用資料夾方式或最新版 Chrome / Edge");
+      await f.h.handle.move(newName);
+      f.file = await f.h.handle.getFile();
+      f.path = newName; f.name = newName;
+      files.sort(function (a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); });
+      return newName;
+    }
     var caseOnly = newName.toLowerCase() === oldName.toLowerCase();
     if (!caseOnly) {
       var exists = true;
@@ -410,7 +371,6 @@
     renaming = true;
     try {
       var old = f.name, asked = newName;
-      await attachParent(f);
       newName = await uniqueName(f, newName);
       newName = await doRename(f, newName);
       undoStack.push({ id: f.id, oldName: old, newName: newName });
@@ -475,28 +435,45 @@
     $("#dirIn").click();
   });
   $("#pickFiles").addEventListener("click", async function () {
-    if (window.showOpenFilePicker) {
-      try {
-        var fhs = await window.showOpenFilePicker({ multiple: true, types: [{ description: "PDF 檔案", accept: { "application/pdf": [".pdf"] } }] });
-        var fo = [];
-        for (var fh of fhs) { var ff = await fh.getFile(); hOf.set(ff, { parent: null, handle: fh }); fo.push(ff); }
-        addFiles(fo, false); return;
-      } catch (e) { if (e && e.name === "AbortError") return; }
+    if (!window.showOpenFilePicker) { $("#count").textContent = "此瀏覽器不支援，請改用 Chrome 或 Edge。"; return; }
+    try {
+      var hs = await window.showOpenFilePicker({ multiple: true, mode: "readwrite",
+        types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] });
+      var granted = true, out = [];
+      for (var h of hs) {
+        try {
+          if ((await h.queryPermission({ mode: "readwrite" })) !== "granted" &&
+              (await h.requestPermission({ mode: "readwrite" })) !== "granted") granted = false;
+        } catch (e) { granted = false; }
+      }
+      for (var h2 of hs) {
+        var dup = false;
+        for (var x of files) { if (x.h && await x.h.handle.isSameEntry(h2)) { dup = true; break; } }
+        if (dup) continue;
+        var f = await h2.getFile();
+        pathOf.set(f, f.name);
+        if (granted) hOf.set(f, { handle: h2 });
+        out.push(f);
+      }
+      addFiles(out, false);
+      dirNote = granted ? "" : "你在瀏覽器提示中沒有按「儲存變更」，所以只能預覽。要改名請重新按「加入檔案」，並在提示中點「儲存變更」";
+      setupRename(byId(curId));
+    } catch (e) {
+      if (e && e.name === "AbortError") { $("#count").textContent = "沒有選到檔案，或在瀏覽器提示中按了「取消」。請再按一次「加入檔案」。"; return; }
+      $("#count").textContent = "加入檔案失敗：" + ((e && (e.name + " " + e.message)) || String(e));
     }
-    $("#fileIn").click();
   });
   $("#dirIn").addEventListener("change", function () {
     var n = this.files.length; addFiles(this.files, true);
-    if (!n) $("#count").textContent = "瀏覽器沒有回傳任何檔案，可能被公司設定擋住；請改用「加入檔案」或直接拖曳。";
+    if (!n) $("#count").textContent = "瀏覽器沒有回傳任何檔案，請改用拖曳整個資料夾的方式。";
     this.value = "";
   });
-  $("#fileIn").addEventListener("change", function () { addFiles(this.files, false); this.value = ""; });
   $("#clear").addEventListener("click", function () {
     files = []; view = []; curId = null; ++openTok; ++layTok; thumbQ.length = 0; closeDoc();
-    renderList(); $("#title").textContent = "請在左側選擇資料夾，或把 PDF 拖進來";
+    renderList(); $("#title").textContent = "請在左側選擇資料夾，或把整個資料夾拖進來";
     $("#zoomTxt").textContent = "—";
     stage.innerHTML = '<p class="empty">已清空。</p>'; updateNav();
-    undoStack = []; setupRename(null); rmsg("要改名，請用「選擇資料夾」按鈕開啟資料夾（Chrome 或 Edge）。", false);
+    undoStack = []; setupRename(null); rmsg("要改名，請用「選擇資料夾」或「加入檔案」按鈕開啟（Chrome 或 Edge）。", false);
   });
 
   document.addEventListener("keydown", function (e) {
@@ -520,6 +497,12 @@
       (function next() { reader.readEntries(function (b) { if (!b.length) ok(all); else { all = all.concat(Array.from(b)); next(); } }, no); })();
     });
   }
+  var toastTimer;
+  function toast(t) {
+    $("#toastTxt").textContent = t; $("#toast").hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { $("#toast").hidden = true; }, 8000);
+  }
+  $("#toastOk").addEventListener("click", function () { $("#toast").hidden = true; });
   var skipped = [];
   async function walkEntry(en, prefix, out) {
     try {
@@ -544,9 +527,9 @@
     /* 方法一：取得資料夾控制代碼，會跳出「編輯檔案」的允許提示，之後也能改名 */
     var hs = (await Promise.all(hps)).filter(Boolean);
     var dirs = hs.filter(function (h) { return h.kind === "directory"; });
-    if (hs.length) {
+    if (dirs.length) {
       try {
-        $("#count").textContent = dirs.length ? "等待你在瀏覽器提示中點「儲存變更」…" : "讀取檔案中…";
+        $("#count").textContent = "等待你在瀏覽器提示中點「儲存變更」…";
         var granted = true;
         for (var d of dirs) {
           var st = d.requestPermission ? await d.requestPermission({ mode: "readwrite" }) : "denied";
@@ -555,7 +538,6 @@
         $("#count").textContent = "讀取資料夾中…";
         var out2 = []; noHandles = !granted;
         for (var d2 of dirs) await walk(d2, "", out2);
-        for (var h of hs) if (h.kind === "file" && /\.pdf$/i.test(h.name)) { var hf = await h.getFile(); if (!noHandles) hOf.set(hf, { parent: null, handle: h }); out2.push(hf); }
         noHandles = false;
         addFiles(out2, false);
         if (!granted) { dirNote = "你在瀏覽器提示中沒有按「儲存變更」，所以只能預覽。要改名請重新拖一次，並在提示中點「儲存變更」"; setupRename(byId(curId)); }
@@ -572,7 +554,10 @@
         addFiles(out, false);
         if (skipped.length) $("#count").textContent = "已載入 " + out.length + " 個，" + skipped.length + " 個讀不到：" + skipped.slice(0, 5).join("、") + (skipped.length > 5 ? "…" : "") + "。可改用「選擇資料夾」按鈕補載。";
       } catch (err) { $("#count").textContent = "讀取資料夾失敗：" + ((err && (err.name + " " + err.message)) || String(err)); }
-    } else if (plain.length) addFiles(plain, false);
+    } else if (plain.length) {
+      $("#count").textContent = "拖曳單獨檔案無法使用，請改按「加入檔案」。";
+      toast("無法直接拖曳單獨的檔案進來（瀏覽器不會詢問改名權限）。請按左側的「加入檔案」來選取檔案；要拖曳的話，請拖整個資料夾。");
+    }
   });
 })();
 </script>
