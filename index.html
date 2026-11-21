@@ -6,66 +6,99 @@
 <title>PDF 工具箱</title>
 <style>
   :root {
-    --bg: #f5f6f4; --panel: #ffffff; --fg: #1d2421; --muted: #67716c; --line: #dde1dd;
-    --accent: #0f6e5a; --accent-soft: #e2f1ec;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #151a18; --panel: #1e2522; --fg: #e8ece9; --muted: #98a39d; --line: #313a36;
-      --accent: #3fb598; --accent-soft: #1d332d; color-scheme: dark; }
+    color-scheme: light;
+    --bg: #fbfcfe; --panel: #ffffff; --fg: #19263a; --muted: #5d6b82; --line: #e3e9f2;
+    --sky: #eaf3ff; --blue: #2563eb; --blue-soft: #e5eeff;
+    --teal: #0b8f83; --teal-soft: #d9f4ef;
+    --orange: #e0620d; --orange-soft: #ffe9d6;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg);
-    font: 15px/1.55 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 64px; }
-  h1 { font-size: 1.7rem; margin: 0 0 6px; }
-  .sub { color: var(--muted); margin: 0 0 28px; }
-  .tools { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
-  a.tool { display: flex; flex-direction: column; gap: 6px; padding: 18px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 10px; color: inherit; text-decoration: none; min-width: 0; }
-  a.tool:hover, a.tool:focus-visible { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
-  a.tool h2 { margin: 0; font-size: 1.1rem; color: var(--accent); }
-  a.tool p { margin: 0; }
-  a.tool .tags { color: var(--muted); font-size: .85rem; margin-top: 4px; }
-  .go { margin-top: auto; padding-top: 8px; color: var(--accent); font-weight: 600; }
-  .notes { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
-  .notes h2 { font-size: 1rem; color: var(--fg); margin: 0 0 8px; }
-  .notes ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+    font: 16px/1.6 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
+  .top { background: linear-gradient(180deg, var(--sky) 0%, var(--bg) 100%);
+    padding-block: 56px 28px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.2; margin: 0 0 10px; letter-spacing: .02em; }
+  .sub { color: var(--muted); margin: 0; max-width: 34em; font-size: 1.05rem; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; margin-top: 18px; padding: 6px 14px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; font-size: .9rem; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #22b573; }
+  main { padding-block: 8px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .tools { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+  a.tool { --c: var(--blue); --cs: var(--blue-soft);
+    display: flex; flex-direction: column; gap: 10px; padding: 24px 22px 20px; min-width: 0;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px; color: inherit; text-decoration: none;
+    box-shadow: 0 2px 10px rgba(25, 38, 58, .05); transition: transform .15s, box-shadow .15s, border-color .15s; }
+  a.tool.merge { --c: var(--teal); --cs: var(--teal-soft); }
+  a.tool.serial { --c: var(--orange); --cs: var(--orange-soft); }
+  a.tool:hover, a.tool:focus-visible { transform: translateY(-3px); border-color: var(--c); outline: none;
+    box-shadow: 0 10px 26px rgba(25, 38, 58, .12); }
+  .ico { width: 56px; height: 56px; border-radius: 16px; background: var(--cs); color: var(--c);
+    display: flex; align-items: center; justify-content: center; }
+  .ico svg { width: 30px; height: 30px; }
+  a.tool h2 { margin: 6px 0 0; font-size: 1.2rem; }
+  a.tool p { margin: 0; color: var(--muted); font-size: .95rem; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .tags span { padding: 2px 10px; background: var(--cs); color: var(--c); border-radius: 999px; font-size: .8rem; font-weight: 600; }
+  .go { margin-top: auto; padding-top: 12px; color: var(--c); font-weight: 700; }
+  .notes { margin-top: 36px; padding: 18px 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+  .notes h2 { font-size: 1rem; margin: 0 0 8px; }
+  .notes ul { margin: 0; padding-left: 1.2em; color: var(--muted); font-size: .92rem; display: flex; flex-direction: column; gap: 4px; }
+  @media (prefers-reduced-motion: reduce) { a.tool { transition: none; } a.tool:hover { transform: none; } }
 </style>
 </head>
 <body>
-<main>
-  <h1>PDF 工具箱</h1>
-  <p class="sub">選一個工具開始。所有檔案都只在你的瀏覽器裡處理，不會上傳到任何地方。</p>
+  <header class="top">
+    <div class="wrap">
+      <h1>PDF 工具箱</h1>
+      <p class="sub">預覽、改名、合併，一個頁面搞定。選一個工具開始吧。</p>
+      <span class="badge"><span class="dot"></span>檔案只在你的瀏覽器內處理，不會上傳</span>
+    </div>
+  </header>
 
-  <div class="tools">
-    <a class="tool" href="pdf-viewer.html">
-      <h2>PDF 預覽與改名</h2>
-      <p>瀏覽整個資料夾的 PDF，一邊看內容一邊直接修改檔名，同名時自動加上 (1)。</p>
-      <span class="tags">預覽 · 改檔名 · 可復原</span>
-      <span class="go">開啟 →</span>
-    </a>
-    <a class="tool" href="pdf-merge.html">
-      <h2>PDF 合併</h2>
-      <p>拖入多個 PDF，調整順序後合併成一個檔案，可選頁碼範圍，並可把奇數頁補成偶數頁。</p>
-      <span class="tags">合併 · 排序 · 補足偶數頁</span>
-      <span class="go">開啟 →</span>
-    </a>
-    <a class="tool" href="serial-check-merge.html">
-      <h2>流水號核對與合併</h2>
-      <p>設定流水號範圍，拖入檔案自動打勾，列出還缺哪些號碼，補齊後依流水號順序合併。</p>
-      <span class="tags">核對缺號 · 依流水號合併 · 補足偶數頁</span>
-      <span class="go">開啟 →</span>
-    </a>
-  </div>
+  <main>
+    <div class="wrap">
+      <div class="tools">
+        <a class="tool" href="pdf-viewer.html">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><circle cx="11" cy="14" r="2.6"/><path d="m13 16 2.2 2.2"/></svg>
+          </span>
+          <h2>PDF 預覽與改名</h2>
+          <p>瀏覽整個資料夾的 PDF，一邊看內容一邊直接修改檔名。</p>
+          <div class="tags"><span>預覽</span><span>改檔名</span><span>可復原</span></div>
+          <span class="go">開啟工具 →</span>
+        </a>
 
-  <section class="notes">
-    <h2>使用前</h2>
-    <ul>
-      <li>建議使用 Chrome 或 Edge。「改檔名」功能只有這兩個瀏覽器支援，Firefox 和 Safari 只能預覽。</li>
-      <li>第一次開啟需要連網，用來載入 PDF 處理元件。</li>
-      <li>改檔名會直接更動電腦上的檔案，瀏覽器會先詢問你是否允許。</li>
-    </ul>
-  </section>
-</main>
+        <a class="tool merge" href="pdf-merge.html">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="9" height="12" rx="1.5"/><rect x="12" y="9" width="9" height="12" rx="1.5"/><path d="M7.5 18.5H9M15 6h1.5"/></svg>
+          </span>
+          <h2>PDF 合併</h2>
+          <p>拖入多個 PDF，調整順序後合併成一個檔案，可選頁碼範圍。</p>
+          <div class="tags"><span>合併</span><span>排序</span><span>補足偶數頁</span></div>
+          <span class="go">開啟工具 →</span>
+        </a>
+
+        <a class="tool serial" href="serial-check-merge.html">
+          <span class="ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2"/><circle cx="5" cy="18" r="1.4"/></svg>
+          </span>
+          <h2>流水號核對與合併</h2>
+          <p>設定流水號範圍，拖入檔案自動打勾，列出缺少的號碼，補齊後依序合併。</p>
+          <div class="tags"><span>核對缺號</span><span>依流水號</span><span>補足偶數頁</span></div>
+          <span class="go">開啟工具 →</span>
+        </a>
+      </div>
+
+      <section class="notes">
+        <h2>使用前</h2>
+        <ul>
+          <li>建議使用 Chrome 或 Edge。「改檔名」只有這兩個瀏覽器支援，其他瀏覽器只能預覽。</li>
+          <li>第一次開啟需要連網，用來載入 PDF 處理元件。</li>
+          <li>改檔名會直接更動電腦上的檔案，瀏覽器會先詢問你是否允許。</li>
+        </ul>
+      </section>
+    </div>
+  </main>
 </body>
 </html>
