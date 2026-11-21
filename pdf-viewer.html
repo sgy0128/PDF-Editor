@@ -76,8 +76,15 @@
   .theme-btn .i-sun, .theme-btn .lbl-light { display: none; }
   :root[data-theme="dark"] .theme-btn .i-sun, :root[data-theme="dark"] .theme-btn .lbl-light { display: inline; }
   :root[data-theme="dark"] .theme-btn .i-moon, :root[data-theme="dark"] .theme-btn .lbl-dark { display: none; }
-  .home { color: var(--muted); text-decoration: none; font-size: .88rem; }
-  .home:hover { color: var(--accent); }
+  .home { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 5px 14px 5px 6px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--fg);
+    text-decoration: none; font-size: .88rem; font-weight: 600; white-space: nowrap; transition: border-color .15s, color .15s; }
+  .home .hi { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; }
+  .home .hi svg { width: 14px; height: 14px; }
+  .bar .theme-btn { margin-left: auto; }
+  .home:hover, .home:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .home:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
   .permhint { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--fg); font-size: .82rem; line-height: 1.5; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 </style>
@@ -86,7 +93,7 @@
 <div class="app" id="drop">
   <aside>
     <div class="side-top">
-      <a class="home" data-nav="index.html" href="index.html">← 工具箱</a>
+      <a class="home" data-nav="index.html" href="index.html" title="回到工具箱首頁"><span class="hi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>工具箱首頁</a>
       <h1>PDF 預覽器</h1>
       <div class="btns">
         <button class="primary" id="pickDir">選擇資料夾</button>
