@@ -85,6 +85,13 @@
   .cap { display: flex; flex-direction: column; margin-top: 5px; min-width: 0; font-size: .78rem; }
   .cap .no { font-size: .85rem; }
   .cap .nm { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 卡片越大，按鈕、勾選標記與文字也跟著變大 */
+  .pcard { container-type: inline-size; }
+  .acts { gap: clamp(3px, 2.5cqw, 12px); padding: clamp(4px, 3cqw, 14px); }
+  .acts button { width: clamp(20px, 15cqw, 80px); height: clamp(20px, 15cqw, 80px); font-size: clamp(.8rem, 7.5cqw, 2.6rem); border-radius: clamp(6px, 2.5cqw, 14px); }
+  .ck { left: clamp(6px, 3cqw, 16px); top: clamp(6px, 3cqw, 16px); width: clamp(22px, 9cqw, 52px); height: clamp(22px, 9cqw, 52px); font-size: clamp(.8rem, 5cqw, 1.7rem); }
+  .cap { font-size: clamp(.78rem, 4cqw, 1.15rem); }
+  .cap .no { font-size: clamp(.85rem, 4.8cqw, 1.3rem); }
   #lb { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.82); display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 10px; }
   #lbBody { width: calc(100vw - 20px); max-height: calc(100vh - 90px); overflow: auto; color: #fff; text-align: center; }
@@ -427,7 +434,7 @@
     if (!keep) lbBig = false;
     lbI = i; const tok = ++lbTok, p = pages[i];
     $("#lb").hidden = false;
-    $("#lbInfo").textContent = "第 " + (i + 1) + " / " + pages.length + " 頁 · " + nameOf(p) + "　（點圖片放大／縮小，← → 切換，Esc 關閉）";
+    $("#lbInfo").textContent = "第 " + (i + 1) + " / " + pages.length + " 頁 · " + nameOf(p) + "　（點圖片放大／縮小，點空白處或按 Esc 關閉，← → 切換）";
     try {
       const dpr = Math.min(window.devicePixelRatio || 1, 2), k = lbBig ? 2.5 : 1;
       let w = (innerWidth - 60) * dpr * k, hh = (innerHeight - 110) * dpr * k;
@@ -443,7 +450,7 @@
   }
   function closeLb() { lbTok++; $("#lb").hidden = true; $("#lbBody").replaceChildren(); lbI = -1; }
   $("#lbClose").addEventListener("click", closeLb);
-  $("#lb").addEventListener("click", (e) => { if (e.target.id === "lb") closeLb(); });
+  $("#lb").addEventListener("click", (e) => { if (e.target.tagName !== "CANVAS" && e.target.tagName !== "BUTTON") closeLb(); });
 
   /* ---------- 加入檔案 ---------- */
   async function addFiles(list, label) {
