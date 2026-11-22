@@ -25,8 +25,11 @@
   html, body { height: 100%; margin: 0; }
   body { background: var(--bg); color: var(--fg); overflow: hidden;
     font: 14px/1.45 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
-  .app { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
-  aside { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--line); }
+  .app { display: grid; grid-template-columns: var(--side-w, 380px) 1fr; height: 100%; }
+  aside { display: flex; flex-direction: column; min-height: 0; position: relative; background: var(--panel); border-right: 1px solid var(--line); }
+  .resizer { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 5; touch-action: none; }
+  .resizer:hover, .resizer.drag { background: var(--accent-soft); }
+  body.resizing { cursor: col-resize; user-select: none; }
   .side-top { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); }
   .side-top h1 { font-size: 1.05rem; margin: 0; }
   .btns { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -68,6 +71,7 @@
   @media (max-width: 720px) {
     body { overflow: auto; }
     .app { grid-template-columns: 1fr; grid-template-rows: 280px 80vh; height: auto; }
+    .resizer { display: none; }
   }
   .theme-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line);
     border-radius: 999px; background: var(--panel); color: var(--fg); font: inherit; font-size: .85rem; cursor: pointer; white-space: nowrap; }
@@ -108,6 +112,7 @@
       <p class="permhint">請按「選擇資料夾」，或把整個資料夾拖進來。瀏覽器會跳出提示，請用滑鼠點<strong>「儲存變更」</strong>（這是 Chrome 的固定說法，意思是允許本頁修改檔名），不要直接按 Enter，因為預設停在「取消」。若選的是桌面、文件、下載這類系統資料夾會被瀏覽器拒絕，請改選它底下的子資料夾。</p>
     </div>
     <ul id="list"></ul>
+    <div class="resizer" id="resizer" role="separator" aria-orientation="vertical" title="左右拖曳可調整檔案清單寬度（雙擊還原）"></div>
   </aside>
   <main>
     <div class="bar">
@@ -119,6 +124,7 @@
       <button id="zin" disabled aria-label="放大">＋</button>
       <button id="fit" disabled>適合寬度</button>
       <button id="z100" disabled>100%</button>
+      <button id="z150" disabled>150%</button>
       <button class="theme-btn" id="themeBtn" type="button" aria-label="切換深色或淺色主題" title="切換深色或淺色主題"><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span class="lbl-dark">深色</span><span class="lbl-light">淺色</span></button>
     </div>
     <div class="bar" id="rnBar">
@@ -234,7 +240,7 @@
       closeDoc(); curDoc = doc;
       f.pages = doc.numPages; f.err = false; refreshLi(id);
       var n = list.querySelector('li[data-id="' + id + '"]'); if (n) n.classList.add("cur");
-      fitMode = true;
+      fitMode = false; scale = 1;
       await layout();
     } catch (e) {
       if (tok !== openTok) return;
@@ -287,7 +293,7 @@
   function updateNav() {
     var i = view.findIndex(function (f) { return f.id === curId; });
     $("#prev").disabled = i <= 0; $("#next").disabled = i < 0 || i >= view.length - 1;
-    ["zout", "zin", "fit", "z100"].forEach(function (id) { $("#" + id).disabled = !curDoc; });
+    ["zout", "zin", "fit", "z100", "z150"].forEach(function (id) { $("#" + id).disabled = !curDoc; });
   }
   function step(d) {
     var i = view.findIndex(function (f) { return f.id === curId; }), j = i + d;
@@ -402,6 +408,37 @@
   $("#zout").addEventListener("click", function () { zoom(scale / 1.2); });
   $("#fit").addEventListener("click", function () { fitMode = true; layout(); });
   $("#z100").addEventListener("click", function () { zoom(1); });
+  $("#z150").addEventListener("click", function () { zoom(1.5); });
+
+  /* 拖曳調整左側清單寬度 */
+  (function () {
+    var rz = $("#resizer"), root = document.documentElement, KEY = "pdf-tools-side-w", DEF = 380;
+    function clamp(w) { return Math.max(220, Math.min(w, Math.floor(window.innerWidth * 0.7))); }
+    function setW(w) { root.style.setProperty("--side-w", clamp(w) + "px"); }
+    try { var saved = +localStorage.getItem(KEY); if (saved) setW(saved); } catch (e) {}
+    rz.addEventListener("pointerdown", function (e) {
+      e.preventDefault(); rz.setPointerCapture(e.pointerId);
+      rz.classList.add("drag"); document.body.classList.add("resizing");
+    });
+    rz.addEventListener("pointermove", function (e) {
+      if (!rz.hasPointerCapture(e.pointerId)) return;
+      setW(e.clientX);
+    });
+    function end(e) {
+      if (!rz.hasPointerCapture(e.pointerId)) return;
+      rz.releasePointerCapture(e.pointerId);
+      rz.classList.remove("drag"); document.body.classList.remove("resizing");
+      try { localStorage.setItem(KEY, String(parseInt(getComputedStyle(root).getPropertyValue("--side-w"), 10) || DEF)); } catch (x) {}
+      if (fitMode && curDoc) layout();
+    }
+    rz.addEventListener("pointerup", end);
+    rz.addEventListener("pointercancel", end);
+    rz.addEventListener("dblclick", function () {
+      setW(DEF);
+      try { localStorage.setItem(KEY, String(DEF)); } catch (x) {}
+      if (fitMode && curDoc) layout();
+    });
+  })();
   async function walk(dir, prefix, out) {
     for await (var ent of dir.values()) {
       if (ent.kind === "file") {
