@@ -193,10 +193,9 @@
 
     <div class="box">
       <h2>批次壓縮資料夾</h2>
-      <p class="hint" style="margin-top:0">資料夾裡每個檔案各自套用上面「頁面尺寸」和「壓縮」的設定，各存成一份，檔名不變，不會動原檔。子資料夾的結構也會保留。</p>
+      <p class="hint" style="margin-top:0">資料夾裡每個檔案各自套用上面「頁面尺寸」和「壓縮」的設定，各存成一份，檔名不變，不會動原檔。結果會存進該資料夾裡自動新建的子資料夾，原本子資料夾的結構也會保留。</p>
       <div class="row">
-        <button class="primary" id="batchGo" type="button">1. 選擇來源資料夾</button>
-        <button class="primary" id="batchOut" type="button" hidden>2. 選擇輸出資料夾並開始</button>
+        <button class="primary" id="batchGo" type="button">選擇資料夾並開始</button>
         <button id="batchStop" type="button" hidden>停止</button>
       </div>
       <p class="hint" id="batchHint"></p>
@@ -809,7 +808,7 @@
   let batchStop = false, batchBusy = false, pending = null;
   const natPath = (a, b) => (a.dirs.join("/") + "/" + a.name).localeCompare(b.dirs.join("/") + "/" + b.name, "zh-Hant", { numeric: true });
   $("#batchHint").textContent = window.showDirectoryPicker
-    ? "會先選來源資料夾，再選輸出資料夾（建議選一個空的新資料夾，不要選來源資料夾）。同名檔案不會被覆蓋，會自動加上編號。"
+    ? "選好資料夾後會直接開始，結果存到裡面新建的子資料夾「壓縮結果_日期」，每次執行都會建新的，不會蓋掉舊結果。瀏覽器的提示會寫「編輯檔案」，是因為要在裡面建立這個子資料夾；原檔不會被修改。桌面、文件、下載這類系統資料夾會被瀏覽器拒絕，請選它底下的子資料夾。"
     : "這個瀏覽器無法直接寫入資料夾，結果會改成一個個下載（建議用 Chrome 或 Edge，並到瀏覽器設定允許此網頁下載多個檔案）。";
   if (!window.showDirectoryPicker) $("#batchGo").textContent = "選擇資料夾並開始（逐一下載）";
 
@@ -817,7 +816,7 @@
     for await (const ent of dir.values()) {
       try {
         if (ent.kind === "file") { if (MEDIA.test(ent.name)) out.push({ name: ent.name, dirs: prefix, get: () => ent.getFile() }); }
-        else await collectDir(ent, prefix.concat(ent.name), out);
+        else if (!(prefix.length === 0 && /^壓縮結果_/.test(ent.name))) await collectDir(ent, prefix.concat(ent.name), out);
       } catch (e) {}
     }
   }
@@ -865,14 +864,14 @@
   }
   function batchReset() {
     batchBusy = false; pending = null;
-    $("#batchGo").hidden = false; $("#batchOut").hidden = true; $("#batchStop").hidden = true;
+    $("#batchGo").hidden = false; $("#batchStop").hidden = true;
   }
 
-  async function runBatchItems(items, outDir, o) {
+  async function runBatchItems(items, outDir, o, label) {
     if (!items.length) { show("這個資料夾裡沒有 PDF、JPG 或 PNG 檔案。", "err"); batchReset(); return; }
     items.sort(natPath);
     batchBusy = true; batchStop = false;
-    $("#batchGo").hidden = true; $("#batchOut").hidden = true; $("#batchStop").hidden = false;
+    $("#batchGo").hidden = true; $("#batchStop").hidden = false;
     const ul = $("#blist"); ul.innerHTML = ""; ul.hidden = false;
     const dirCache = new Map(), usedNames = new Map();
     let before = 0, after = 0, ok = 0, bad = 0, kept = 0, done = 0;
@@ -920,42 +919,33 @@
     if (kept) t += "；" + kept + " 個壓縮後沒變小，已保留原檔";
     if (bad) t += "；" + bad + " 個失敗（可能需要開啟密碼或檔案損毀）";
     if (stopped) t += "；還有 " + (items.length - done) + " 個沒處理";
+    if (label && ok) t += "。結果在「" + label + "」";
     show(t, bad ? "warn" : undefined);
   }
 
-  /* 第一步：選來源資料夾，先列出找到幾個檔案 */
+  /* 選一個資料夾（授權讀寫），在裡面新建子資料夾存結果，直接開始 */
   $("#batchGo").addEventListener("click", async () => {
     if (batchBusy) return;
-    if (!batchOptsOk()) return;
+    const o = batchOptsOk(); if (!o) return;
     hide();
     if (!window.showDirectoryPicker) { $("#bdirIn").click(); return; }
     try {
-      const srcDir = await window.showDirectoryPicker({ mode: "read" });
+      const srcDir = await window.showDirectoryPicker({ mode: "readwrite" });
       show("讀取資料夾中…");
       const items = []; await collectDir(srcDir, [], items);
       if (!items.length) { show("這個資料夾裡沒有 PDF、JPG 或 PNG 檔案。", "err"); return; }
-      pending = { srcDir, items };
-      $("#batchGo").hidden = true; $("#batchOut").hidden = false;
-      show("在「" + srcDir.name + "」找到 " + items.length + " 個檔案。請按「2. 選擇輸出資料夾並開始」（要重選來源，重新整理頁面即可）。");
+      const base = "壓縮結果_" + today();
+      let name = base, n = 0;
+      for (;;) {
+        try { await srcDir.getDirectoryHandle(name); }
+        catch (e) { if (e.name === "NotFoundError") break; if (e.name !== "TypeMismatchError") throw e; }
+        name = base + " (" + (++n) + ")";
+      }
+      const outDir = await srcDir.getDirectoryHandle(name, { create: true });
+      await runBatchItems(items, outDir, o, srcDir.name + "/" + name);
     } catch (e) {
       if (e && e.name === "AbortError") { hide(); return; }
-      show("無法開啟資料夾：" + ((e && (e.name + " " + e.message)) || e), "err");
-    }
-  });
-  /* 第二步：選輸出資料夾（需要一次新的點擊，瀏覽器才允許再開選擇視窗） */
-  $("#batchOut").addEventListener("click", async () => {
-    if (batchBusy || !pending) return;
-    const o = batchOptsOk(); if (!o) return;
-    try {
-      const outDir = await window.showDirectoryPicker({ mode: "readwrite" });
-      const rel = await pending.srcDir.resolve(outDir);
-      if (rel && rel.length === 0) { show("輸出資料夾不能和來源資料夾相同，否則會覆蓋原檔。請選另一個資料夾。", "err"); return; }
-      let items = pending.items;
-      if (rel) items = items.filter((it) => !rel.every((s, i) => it.dirs[i] === s));   // 輸出資料夾在來源裡面時，不要再處理它
-      await runBatchItems(items, outDir, o);
-    } catch (e) {
-      if (e && e.name === "AbortError") return;
-      show("無法使用輸出資料夾：" + ((e && (e.name + " " + e.message)) || e), "err");
+      show("無法使用資料夾：" + ((e && (e.name + " " + e.message)) || e), "err");
       batchReset();
     }
   });
