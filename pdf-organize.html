@@ -87,8 +87,8 @@
   .cap .nm { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #lb { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.82); display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 10px; }
-  #lbBody { max-width: 100%; max-height: calc(100vh - 90px); display: flex; align-items: center; justify-content: center; color: #fff; }
-  #lbBody canvas { background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.5); }
+  #lbBody { width: calc(100vw - 20px); max-height: calc(100vh - 90px); overflow: auto; color: #fff; text-align: center; }
+  #lbBody canvas { display: block; margin: 0 auto; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.5); }
   #lbInfo { color: #fff; font-size: .9rem; text-align: center; padding: 0 12px; }
   #blist { list-style: none; margin: 10px 0 0; padding: 0; max-height: 280px; overflow-y: auto; font-size: .8rem; display: flex; flex-direction: column; gap: 4px; }
   #blist li { display: flex; gap: 8px; justify-content: space-between; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
@@ -217,7 +217,7 @@
       <button id="blank" class="needSel" disabled>插入空白頁</button>
       <button id="del" class="needSel" disabled>刪除</button>
       <button id="undo" disabled>復原</button>
-      <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted)">縮圖<input type="range" id="tw" min="110" max="300" step="10" value="170" aria-label="縮圖大小"></label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--muted)">縮圖<input type="range" id="tw" min="110" max="600" step="10" value="260" aria-label="縮圖大小"></label>
       <span class="info" id="info">尚未加入檔案</span>
     </div>
     <div id="grid" hidden></div>
@@ -289,6 +289,7 @@
       ? "壓縮會把每一頁轉成圖片，文字將無法選取、搜尋或複製。掃描檔效果最好；本來就很小的檔案可能反而變大。"
       : "不壓縮時，PDF 的文字與向量內容會保留。圖片檔一律轉成 JPEG 放入。";
     grid.style.setProperty("--tw", $("#tw").value + "px");
+    calcThumb();
   }
   ["orient", "margin", "preset", "gray", "tw"].forEach((id) => $("#" + id).addEventListener("input", () => { refreshControls(); saveSet(); }));
   document.querySelectorAll("input[name=size]").forEach((r) => r.addEventListener("change", () => { refreshControls(); saveSet(); }));
@@ -296,7 +297,7 @@
   /* ---------- 頁面資料 ---------- */
   function mk(o) {
     const p = Object.assign({ id: nextPid++, src: null, idx: 0, type: "pdf", rot: 0, bw: 0, bh: 0, i: 0, sel: false,
-      thumb: null, thumbRot: -1, shown: null, queued: false, vis: false, err: false, alive: true }, o);
+      thumb: null, thumbRot: -1, thumbPx: 0, shown: null, queued: false, vis: false, err: false, alive: true }, o);
     createCard(p);
     return p;
   }
@@ -346,6 +347,7 @@
     pages.forEach((p, i) => { p.alive = true; p.i = i; updateCard(p); f.appendChild(p.el); });
     grid.replaceChildren(f);
     updateStats();
+    calcThumb();
   }
   function refreshSel() { pages.forEach((p) => p.el.classList.toggle("sel", p.sel)); updateStats(); }
   function updateStats() {
@@ -394,8 +396,15 @@
     return c;
   }
   const tq = []; let busy = false;
+  let thumbPx = 400;   // 縮圖的畫素高度，依卡片實際大小自動調整
+  function calcThumb() {
+    const c = grid.firstElementChild, w = c && c.clientWidth ? c.clientWidth : +$("#tw").value;
+    const px = w * Math.min(window.devicePixelRatio || 1, 2) * 4 / 3, steps = [400, 600, 800, 1000, 1300];
+    const n = steps.find((s) => s >= px) || steps[steps.length - 1];
+    if (n !== thumbPx) { thumbPx = n; pages.forEach((p) => { if (p.vis) queueThumb(p); }); }
+  }
   function queueThumb(p) {
-    if (p.queued || (p.thumb && p.thumbRot === p.rot)) return;
+    if (p.queued || (p.thumb && p.thumbRot === p.rot && p.thumbPx >= thumbPx)) return;
     p.queued = true; tq.push(p); pump();
   }
   async function pump() {
@@ -403,27 +412,33 @@
     while (tq.length) {
       const p = tq.shift(); p.queued = false;
       if (!p.alive) continue;
-      const r = p.rot;
-      try { const c = await renderPage(p, 300, 400); p.thumb = c.toDataURL("image/jpeg", 0.75); p.thumbRot = r; p.err = false; c.width = c.height = 0; }
+      const r = p.rot, px = thumbPx;
+      try { const c = await renderPage(p, px * 0.75, px); p.thumb = c.toDataURL("image/jpeg", 0.8); p.thumbRot = r; p.thumbPx = px; p.err = false; c.width = c.height = 0; }
       catch (e) { p.err = true; }
       updateCard(p);
-      if (!p.err && p.rot !== p.thumbRot) queueThumb(p);
+      if (!p.err && (p.rot !== p.thumbRot || p.thumbPx < thumbPx)) queueThumb(p);
     }
     busy = false;
   }
 
-  let lbI = -1, lbTok = 0;
-  async function openLb(i) {
+  let lbI = -1, lbTok = 0, lbBig = false;
+  async function openLb(i, keep) {
     if (i < 0 || i >= pages.length) return;
+    if (!keep) lbBig = false;
     lbI = i; const tok = ++lbTok, p = pages[i];
     $("#lb").hidden = false;
-    $("#lbInfo").textContent = "第 " + (i + 1) + " / " + pages.length + " 頁 · " + nameOf(p) + "　（← → 切換，Esc 關閉）";
+    $("#lbInfo").textContent = "第 " + (i + 1) + " / " + pages.length + " 頁 · " + nameOf(p) + "　（點圖片放大／縮小，← → 切換，Esc 關閉）";
     try {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const c = await renderPage(p, (innerWidth - 60) * dpr, (innerHeight - 110) * dpr);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2), k = lbBig ? 2.5 : 1;
+      let w = (innerWidth - 60) * dpr * k, hh = (innerHeight - 110) * dpr * k;
+      if (hh > 5000) { w *= 5000 / hh; hh = 5000; }
+      const c = await renderPage(p, w, hh);
       if (tok !== lbTok) return;
       c.style.width = c.width / dpr + "px"; c.style.height = c.height / dpr + "px";
+      c.style.cursor = lbBig ? "zoom-out" : "zoom-in";
+      c.addEventListener("click", () => { lbBig = !lbBig; openLb(lbI, true); });
       $("#lbBody").replaceChildren(c);
+      if (lbBig) $("#lbBody").scrollTop = 0;
     } catch (e) { if (tok === lbTok) $("#lbBody").textContent = "無法顯示這一頁"; }
   }
   function closeLb() { lbTok++; $("#lb").hidden = true; $("#lbBody").replaceChildren(); lbI = -1; }
@@ -628,7 +643,7 @@
   });
   document.addEventListener("keydown", (e) => {
     if (!$("#lb").hidden) {
-      if (e.key === "Escape") closeLb(); else if (e.key === "ArrowRight") openLb(lbI + 1); else if (e.key === "ArrowLeft") openLb(lbI - 1);
+      if (e.key === "Escape") closeLb(); else if (e.key === "ArrowRight") openLb(lbI + 1, true); else if (e.key === "ArrowLeft") openLb(lbI - 1, true);
       return;
     }
     if (["INPUT", "SELECT", "TEXTAREA"].indexOf(e.target.tagName) !== -1) return;
@@ -947,6 +962,7 @@
     runBatchItems(fl.map((f) => ({ name: f.name, dirs: [], get: async () => f })), null, o);
   });
 
+  let rzT; window.addEventListener("resize", () => { clearTimeout(rzT); rzT = setTimeout(calcThumb, 250); });
   loadSet(); refreshControls(); render();
 })();
 </script>
