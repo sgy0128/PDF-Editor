@@ -51,7 +51,7 @@
     background: var(--bg); color: var(--fg); font: inherit; min-width: 0; width: 100%; }
   .hint { color: var(--muted); font-size: .8rem; margin: 6px 0 0; }
   .hint a { color: var(--accent); }
-  #dz { border: 2px dashed var(--line); border-radius: 10px; padding: 16px 10px; text-align: center; cursor: pointer; }
+  #dz { border: 2px dashed var(--line); border-radius: 10px; padding: 36px 10px; text-align: center; cursor: pointer; }
   #dz.over { border-color: var(--accent); background: var(--accent-soft); }
   #dz strong { display: block; }
   #dz span { color: var(--muted); font-size: .82rem; }
@@ -120,9 +120,15 @@
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 56px; margin: 0; padding: 0 24px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
   .topbar .home { align-self: center; }
   .topbar .theme-btn { margin-left: auto; padding: 6px 12px; font-size: .85rem; }
+
+  #dropOv { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center; pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 14%, transparent); border: 4px dashed var(--accent); }
+  #dropOv.show { display: flex; }
+  #dropOv b { padding: 16px 28px; border-radius: 12px; background: var(--panel); color: var(--accent); font-size: 1.3rem; box-shadow: 0 8px 28px rgba(0,0,0,.25); }
 </style>
 </head>
 <body>
+<div id="dropOv" aria-hidden="true"><b>放開即可加入檔案</b></div>
 <div class="topbar"><a class="home" data-nav="index.html" href="index.html" title="回到工具箱首頁"><span class="hi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>工具箱首頁</a><button class="theme-btn" id="themeBtn" type="button" aria-label="切換深色或淺色主題" title="切換深色或淺色主題"><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span class="lbl-dark">深色</span><span class="lbl-light">淺色</span></button></div>
 <div class="layout">
   <aside class="side">
@@ -135,8 +141,8 @@
     <div class="box">
       <h2>1. 加入檔案</h2>
       <div id="dz" tabindex="0" role="button" aria-label="選擇或拖曳檔案">
-        <strong>把資料夾或 PDF 拖到這裡</strong>
-        <span>也支援 JPG、PNG（每張一頁）。可重複加入，頁面會接在後面。</span>
+        <strong>把資料夾或 PDF 拖到頁面任何地方</strong>
+        <span>放開就會加入；也支援 JPG、PNG（每張一頁）。可重複加入，頁面會接在後面。</span>
       </div>
       <div class="row">
         <button id="pickDir" type="button">選擇資料夾</button>
@@ -501,10 +507,11 @@
     this.value = "";
   });
   function hasFiles(e) { return e.dataTransfer && Array.from(e.dataTransfer.types || []).indexOf("Files") !== -1; }
-  window.addEventListener("dragover", (e) => { e.preventDefault(); if (hasFiles(e)) dz.classList.add("over"); });
-  window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) dz.classList.remove("over"); });
+  const ov = $("#dropOv");
+  window.addEventListener("dragover", (e) => { e.preventDefault(); if (hasFiles(e)) { dz.classList.add("over"); ov.classList.add("show"); } });
+  window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) { dz.classList.remove("over"); ov.classList.remove("show"); } });
   window.addEventListener("drop", async (e) => {
-    e.preventDefault(); dz.classList.remove("over");
+    e.preventDefault(); dz.classList.remove("over"); ov.classList.remove("show");
     if (!hasFiles(e)) return;
     const dt = e.dataTransfer;
     /* 必須在 await 之前同步取得 */
