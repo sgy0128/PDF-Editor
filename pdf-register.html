@@ -71,7 +71,7 @@
   .field.bad input[type=text] { border-color: var(--danger); background: var(--danger-soft); }
   .field.bad .note { color: var(--danger); }
   .crop { display: block; max-width: 100%; max-height: 90px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
-  .strip { display: block; max-height: 300px; max-width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .strip { display: block; max-height: 460px; max-width: 100%; cursor: zoom-in; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .chips button { padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); border-color: var(--accent); }
   .grp { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 2px; }
@@ -524,7 +524,7 @@
     const full = await renderFull(rec);
     const view = cropC(full, 0, 0, 1, 1, Math.min(1, 1200 / full.width));
     rec.img = url(view, 0.82);
-    rec.strip = url(cropC(full, 0.84, 0, 1, 1, Math.min(1, 1000 / full.height)), 0.85);
+    rec.strip = url(cropC(full, 0.80, 0.62, 1, 1, 1), 0.9);
     const st = findSticky(full);
     if (st) { rec.sticky = true; rec.stickyImg = url(cropPx(full, st[0] - 10, st[1] - 10, st[2] + 20, st[3] + 20, Math.min(1.5, 700 / (st[2] + 20))), 0.9); rec.type = "cap"; }
     const bt = analyzeBottom(full);
@@ -678,6 +678,7 @@
   }
   bind("code", (r) => { r.code = F.code.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); r.codeFlags = []; r.codeSoft = ""; $("#fCode").classList.remove("uncertain"); $("#codeNote").textContent = ""; const s = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = s ? s + "派出所" : ""; });
   bind("who"); bind("realWho");
+  $("#stripImg").addEventListener("click", (e) => { const s = e.target.style; const big = s.maxHeight === "900px"; s.maxHeight = big ? "" : "900px"; s.cursor = big ? "zoom-in" : "zoom-out"; });
   bind("date", (r) => { r.dateFlag = ""; $("#fDate").classList.remove("uncertain"); $("#dateNote").textContent = ""; });
   bind("caseNo", (r) => { r.caseNo = F.caseNo.value.replace(/\D/g, ""); });
   bind("cat", (r) => { r.catFlag = ""; $("#fCat").classList.remove("uncertain"); $("#catNote").textContent = ""; });
