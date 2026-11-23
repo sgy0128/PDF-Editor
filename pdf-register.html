@@ -71,7 +71,7 @@
   .field.bad input[type=text] { border-color: var(--danger); background: var(--danger-soft); }
   .field.bad .note { color: var(--danger); }
   .crop { display: block; max-width: 100%; max-height: 90px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
-  .strip { display: block; max-height: 460px; max-width: 100%; cursor: zoom-in; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .strip { display: block; max-height: 300px; max-width: 100%; cursor: zoom-in; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .chips button { padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); border-color: var(--accent); }
   .grp { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 2px; }
@@ -113,6 +113,28 @@
     background: color-mix(in srgb, var(--accent) 14%, transparent); border: 4px dashed var(--accent); }
   #dropOv.show { display: flex; }
   #dropOv b { padding: 16px 28px; border-radius: 12px; background: var(--panel); color: var(--accent); font-size: 1.3rem; box-shadow: 0 8px 28px rgba(0,0,0,.25); }
+
+  /* ===== 核對版面：整頁圖、表單、案件清冊一次看到，各自在框內捲動，不會牽動整個視窗 ===== */
+  main { max-width: 1800px; }
+  .work { grid-template-columns: minmax(0, 1fr) 430px minmax(0, 1.05fr); height: calc(100vh - 24px); min-height: 560px; align-items: stretch; }
+  .viewer { position: static; height: 100%; }
+  #panel { height: 100%; overflow: auto; overscroll-behavior: contain; padding-top: 0; }
+  #panel .nav { position: sticky; top: 0; z-index: 3; background: var(--panel); padding: 10px 0 8px; margin: 0 0 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  #panel .nav .pg { flex: 1 1 100%; order: -1; }
+  #panel .nav button { padding: 5px 9px; font-size: .85rem; }
+  #tblBox { height: 100%; display: flex; flex-direction: column; overflow: hidden; padding: 12px; }
+  #tblBox h2 { margin-bottom: 6px; }
+  #tblBox .tw { flex: 1; max-height: none; min-height: 0; }
+  #tblBox table { font-size: .78rem; }
+  #tblBox th, #tblBox td { padding: 3px 5px; }
+  #tblBox td:nth-child(2) { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+  #tblBox .hint { margin: 4px 0 0; }
+  #tblBox .row { margin-top: 6px; }
+  @media (max-width: 1500px) {
+    .work { grid-template-columns: minmax(0, 1fr) 430px; grid-template-rows: minmax(0, 1fr) auto; }
+    #tblBox { grid-column: 1 / -1; height: auto; max-height: 60vh; }
+  }
+  @media (max-width: 900px) { .work { grid-template-columns: 1fr; height: auto; } .viewer { height: 60vh; } #panel { height: auto; overflow: visible; } }
 </style>
 </head>
 <body>
@@ -147,10 +169,6 @@
       <span>放開就會自動加入；可一次放多個檔案，也可以點這裡選擇檔案。</span>
     </div>
     <input id="pdfIn" type="file" accept="application/pdf,.pdf" multiple hidden>
-    <div class="two">
-      <label class="f">預設收文日期（讀不出日期時使用，格式 2026/11/17）<input id="defDate" type="text" spellcheck="false" placeholder="2026/11/17"></label>
-      <div class="row" style="align-self:end"><button id="applyDate" type="button">把這個日期套用到全部頁</button></div>
-    </div>
     <div class="row">
       <span id="fileInfo" class="hint" style="margin:0"></span>
       <button id="stopOcr" type="button" hidden>停止辨識</button>
@@ -168,6 +186,7 @@
         <div class="pg"><span id="pgNo"></span><div class="st" id="pgSt"></div></div>
         <button id="next" type="button">下一頁 ▶</button>
         <button id="nextWarn" type="button" title="跳到下一個需要核對（⚠）的頁面">下一個 ⚠</button>
+        <button id="okBtn" type="button" title="這頁確認沒問題，取消 ⚠（快速鍵 Ctrl+Enter：取消並到下一頁）">✓ 這頁無誤</button>
       </div>
 
       <div class="radios">
@@ -191,6 +210,10 @@
         <div class="note" id="whoNote"></div>
       </div>
 
+      <div class="two">
+        <div class="field"><div class="lb"><span>發生案號（自己填）</span></div><input id="occNo" type="text" spellcheck="false" autocomplete="off"></div>
+        <div class="field"><div class="lb"><span>發生文號（自己填）</span></div><input id="caseNo" type="text" spellcheck="false" autocomplete="off"></div>
+      </div>
       <div class="field" id="fDate">
         <div class="lb"><span>收文日期（貼紙上的日期，西元）</span></div>
         <img class="crop" id="dateImg" alt="" hidden>
@@ -204,7 +227,6 @@
         </div>
         <div id="stickyBox" hidden>
           <img class="crop" id="stickyImg" alt="" hidden style="max-height:140px">
-          <div class="field"><div class="lb"><span>發生文號（便條紙上的數字）</span></div><input id="caseNo" type="text" spellcheck="false" autocomplete="off"></div>
           <div class="field"><div class="lb"><span>實際承辦人（便條紙上的名字）</span></div>
             <input id="realWho" type="text" spellcheck="false" autocomplete="off" placeholder="輸入名字裡的一個字">
             <div class="chips" id="realChips"></div>
@@ -228,11 +250,9 @@
       <div class="grp row">
         <label class="chk"><input type="checkbox" id="skip">略過此頁（不匯出）</label>
       </div>
-      <p class="hint">快捷鍵：Alt + ← / → 切換頁面。在「承辦人」按 Enter 選取後，再按一次 Enter 會跳到下一頁。</p>
+      <p class="hint">快捷鍵：Ctrl + Enter＝這頁無誤並到下一頁；Alt + ← / → 切換頁面。在「承辦人」按 Enter 選取後，再按一次 Enter 會跳到下一頁。</p>
     </div>
-  </section>
-
-  <section class="box" id="tblBox" hidden>
+  <aside class="box" id="tblBox">
     <h2>3. 檢查與匯出</h2>
     <div class="tw"><table id="tbl"><thead><tr>
       <th>#</th><th>來源</th><th>類型</th><th>承辦人</th><th>E化案號</th><th>發生案號</th><th>發生文號</th><th>實際承辦人</th><th>案類</th><th>文號</th><th>收文日期</th>
@@ -244,7 +264,9 @@
       <button id="csvBtn" type="button">下載 CSV</button>
     </div>
     <p class="hint">複製的欄位順序和你的登記表一致：承辦人、E化案號、發生案號、發生文號、實際承辦人、案類、文號、收文日期。直接貼到登記表第一個空白列的 A 欄，公式不會被蓋掉。</p>
+  </aside>
   </section>
+
 </main>
 
 <script>
@@ -252,8 +274,8 @@
   "use strict";
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const KEY_R = "pdf-register-roster2", KEY_C = "pdf-register-cats", KEY_D = "pdf-register-defdate";
-  const STN = { O1: "土城", P1: "廣福", Q1: "清水", M1: "金城", R1: "頂埔" };
+  const KEY_R = "pdf-register-roster2", KEY_C = "pdf-register-cats";
+  const STN = { O1: "土城", P1: "廣福", Q1: "清水", M1: "金城", R1: "頂埔", "91": "交通分隊" };
   const msg = $("#msg");
   function show(t, k) { msg.textContent = t; msg.className = "show" + (k ? " " + k : ""); }
   function hide() { msg.className = ""; }
@@ -282,8 +304,8 @@
       o += "AD";
       if (!/[1IL]/.test(t[9])) fl.push("分局代號第 3 碼不是 1");
       o += "1";
-      let st = (t[10] === "0" || t[10] === "9") ? "O" : t[10];
-      if (!/[OPQMR]/.test(st)) fl.push("派出所代號不在 O/P/Q/M/R");
+      let st = t[10] === "0" ? "O" : t[10];
+      if (!/[OPQMR9]/.test(st)) fl.push("派出所代號不在 O/P/Q/M/R/91");
       o += st;
       if (!/[1IL]/.test(t[11])) fl.push("派出所代號第 2 碼不是 1");
       o += "1";
@@ -296,7 +318,7 @@
       o += tail;
       const yy = +o.slice(1, 4), mm = +o.slice(4, 6);
       if (yy < 100 || yy > 140 || mm < 1 || mm > 12) fl.push("年月看起來不對");
-      const sc = fl.length, soft = /[6GSB5Z2D0Q8]/.test(tail) ? "末三碼含容易混淆的字（6/G、5/S、8/B、2/Z、0/D），請對照圖片確認" : "";
+      const sc = fl.length, stSoft = /[O9]/.test(st) ? "派出所代號 O 和 9（91＝交通分隊）容易混淆，請核對。 " : "", soft = stSoft + (/[6GSB5Z2D0Q8]/.test(tail) ? "末三碼含容易混淆的字（6/G、5/S、8/B、2/Z、0/D），請對照圖片確認" : "");
       if (!best || sc < best.sc) best = { sc, code: o, flags: Array.from(new Set(fl)), soft };
     }
     return best;
@@ -488,7 +510,7 @@
   const mkRec = (fi, n, name) => ({
     fi, n, src: name + " 第 " + n + " 頁", status: "wait", err: "", img: "", strip: "", stickyImg: "", numImg: "", dateImg: "", codeImg: "",
     nameDate: fileDate(name), ocrDate: "", catFlag: "", occNo: "",
-    type: "occ", code: "", codeFlags: [], codeSoft: "", who: "", sticky: false, caseNo: "", realWho: "", cat: "", docNo: "", docFlag: "", date: "", dateFlag: "",
+    type: "occ", occNo: "", code: "", codeFlags: [], codeSoft: "", who: "", sticky: false, caseNo: "", realWho: "", cat: "", docNo: "", docFlag: "", date: "", dateFlag: "",
     skip: false, touched: {}
   });
   const cands = (q) => { q = String(q).trim(); if (!q) return []; return roster.filter((n) => Array.from(q).every((ch) => n.includes(ch))); };
@@ -521,6 +543,55 @@
     return out;
   }
   const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  /* 載入時就把整頁掃描圖變清晰：紙張底色拉成純白、文字加深（各色同比例，不改色相）。
+     之後畫面上的整頁圖、各個放大圖與辨識都用這張清晰版。 */
+  function cleanPage(cv) {
+    const w = cv.width, hh = cv.height, g = cv.getContext("2d", { willReadFrequently: true });
+    const im = g.getImageData(0, 0, w, hh), d = im.data, n = w * hh, hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) hist[(d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8]++;
+    let acc = 0, lo = 0, hi = 255;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.004) { lo = v; break; } }
+    acc = 0; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.6) { hi = v; break; } }
+    hi = Math.max(hi - 8, lo + 60);
+    const lut = new Uint8Array(256);
+    for (let v = 0; v < 256; v++) { const x = Math.max(0, Math.min(1, (v - lo) / (hi - lo))); lut[v] = Math.round(255 * Math.pow(x, 1.25)); }
+    for (let i = 0; i < n; i++) { d[i * 4] = lut[d[i * 4]]; d[i * 4 + 1] = lut[d[i * 4 + 1]]; d[i * 4 + 2] = lut[d[i * 4 + 2]]; }
+    g.putImageData(im, 0, 0);
+    return cv;
+  }
+  /* 增強：只取紅色通道（紅色印章會消失）、拉開對比，必要時二值化 */
+  function enhance(c, mode) {
+    const w = c.width, hh = c.height, o = document.createElement("canvas"); o.width = w; o.height = hh;
+    const g = o.getContext("2d", { willReadFrequently: true }); g.drawImage(c, 0, 0);
+    const im = g.getImageData(0, 0, w, hh), d = im.data, n = w * hh, hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) hist[d[i * 4]]++;
+    let acc = 0, lo = 0, hi = 255;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.02) { lo = v; break; } }
+    acc = 0; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n * 0.98) { hi = v; break; } }
+    const span = Math.max(30, hi - lo);
+    for (let i = 0; i < n; i++) {
+      let v = Math.max(0, Math.min(255, ((d[i * 4] - lo) / span) * 255));
+      if (mode === "bin") v = v > 150 ? 255 : 0;
+      d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v; d[i * 4 + 3] = 255;
+    }
+    g.putImageData(im, 0, 0);
+    return o;
+  }
+  /* 多種處理結果逐位投票；不一致的位置會提醒核對 */
+  function voteCodes(list) {
+    const rs = list.filter(Boolean); if (!rs.length) return null;
+    const base = rs.reduce((a, b) => (b.sc < a.sc ? b : a));
+    if (rs.length < 2) return base;
+    let o = "", diff = [];
+    for (let p = 0; p < 15; p++) {
+      const cnt = {}; rs.forEach((r) => { const ch = r.code[p]; cnt[ch] = (cnt[ch] || 0) + 1; });
+      let top = base.code[p], tc = cnt[top] || 0;
+      for (const k in cnt) if (cnt[k] > tc) { top = k; tc = cnt[k]; }
+      o += top; if (p >= 10 && Object.keys(cnt).length > 1) diff.push("第 " + (p + 1) + " 碼（" + Object.keys(cnt).join(" / ") + "）");
+    }
+    const f = fixCode(o) || base;
+    return Object.assign({}, f, { soft: (diff.length ? "不同處理方式讀到的結果不一致：" + diff.join("、") + "，請對照圖片。" : "") || f.soft || base.soft });
+  }
   async function ocrCode(full) {
     /* 案號在表單上緣右側；保留較寬範圍，避免不同版型的欄位起點位移 */
     const top = cropC(full, 0.24, 0, 1, 0.27, 1);
@@ -536,7 +607,9 @@
       const p = 16, bw = box.x1 - box.x0 + 2 * p + 70, bh = box.y1 - box.y0 + 2 * p;
       crop = cropPx(top, box.x0 - p, box.y0 - p, bw, bh, 2);
       const d2 = await recog(crop, ALNUM, 7, false), r2 = fixCode(d2.text || "");
-      if (r2 && (!best || r2.sc <= best.sc)) best = r2;
+      const d2b = await recog(enhance(crop, "gray"), ALNUM, 7, false), d2c = await recog(enhance(crop, "bin"), ALNUM, 7, false);
+      const v = voteCodes([r2, fixCode(d2b.text || ""), fixCode(d2c.text || "")]);
+      if (v && (!best || v.sc <= best.sc)) best = v;
     }
     /* 第一輪沒有找到完整案號或有格式疑點時，放大上緣再以單區塊模式補讀一次 */
     if (!best || best.sc > 0) {
@@ -564,6 +637,21 @@
     chiWorker = await Tesseract.createWorker("chi_tra", 1, { logger: (m) => { if (m.status && /loading|initializ/.test(m.status)) $("#progTxt").textContent = "準備中文辨識… " + Math.round((m.progress || 0) * 100) + "%"; } });
     return chiWorker;
   }
+  /* 讀單子上方的標題：刑案呈報單（有犯嫌）／陳報單，以及「○○派出所」 */
+  const STN_LETTER = { 土城: "O", 廣福: "P", 清水: "Q", 金城: "M", 頂埔: "R", 交通: "9" };
+  async function ocrHeader(full) {
+    const w = await ensureChi();
+    const band = cropC(full, 0.05, 0.02, 0.97, 0.45, 1);  /* 含呈報單的「查獲地點（○○派出所）」 */
+    let kind = "", stn = "", name = "";
+    for (const psm of ["6", "11"]) {
+      await w.setParameters({ tessedit_pageseg_mode: psm });
+      const t = String((await w.recognize(band)).data.text || "").replace(/\s+/g, "");
+      if (!kind) kind = /呈報單|案呈報|刑案/.test(t) ? "cap" : /陳報單|陳報/.test(t) ? "occ" : "";
+      if (!stn) { for (const m of t.matchAll(/([\u4e00-\u9fff]{2})(?:派出所|分隊)/g)) { const k = m[1]; if (STN_LETTER[k]) { stn = STN_LETTER[k]; name = k; break; } } }
+      if (kind && (stn || kind === "cap")) break;
+    }
+    return { kind, stn, name };
+  }
   async function ocrCat(full) {
     const w = await ensureChi();
     await w.setParameters({ tessedit_pageseg_mode: "6" });
@@ -574,7 +662,7 @@
   async function runCat(r) {
     $("#catNote").textContent = "辨識中…（第一次要下載中文資料）";
     try {
-      const full = await renderFull(r), c = await ocrCat(full);
+      const full = cleanPage(await renderFull(r)), c = await ocrCat(full);
       full.width = full.height = 1;
       if (!r.touched.cat) { if (c) { r.cat = c; r.catFlag = "自動辨識，請核對"; } else r.catFlag = "沒讀到，請照單子上的「觸犯法條」輸入"; }
     } catch (e) { r.catFlag = "無法辨識（" + (e && e.message ? e.message : e) + "），請手動輸入"; }
@@ -583,12 +671,14 @@
   async function processPage(rec) {
     rec.status = "busy"; refreshStatus();
     const full = await renderFull(rec);
-    const view = cropC(full, 0, 0, 1, 1, Math.min(1, 1200 / full.width));
+    const st0 = findSticky(full), bt0 = analyzeBottom(full);
+    cleanPage(full);
+    const view = cropC(full, 0, 0, 1, 1, Math.min(1, 1600 / full.width));
     rec.img = url(view, 0.82);
     rec.strip = url(cropC(full, 0.80, 0.62, 1, 1, 1), 0.9);
-    const st = findSticky(full);
+    const st = st0;
     if (st) { rec.sticky = true; rec.stickyImg = url(cropPx(full, st[0] - 10, st[1] - 10, st[2] + 20, st[3] + 20, Math.min(1.5, 700 / (st[2] + 20))), 0.9); rec.type = "cap"; }
-    const bt = analyzeBottom(full);
+    const bt = bt0;
     if (bt && bt.num) rec.numImg = url(cropPx(full, bt.num[0], bt.num[1], bt.num[2], bt.num[3], 1), 0.9);
     if (bt && bt.date && !rec.nameDate) rec.dateImg = url(cropPx(full, bt.date[0], bt.date[1], bt.date[2], bt.date[3], 1), 0.9);
     if (worker) {
@@ -609,7 +699,18 @@
         }
       } catch (e) { rec.err = "辨識失敗：" + (e && e.message ? e.message : e); }
     }
-    if (rec.type === "cap" && worker && !rec.touched.cat) {
+    if (worker) {
+      try {
+        const hd = await ocrHeader(full);
+        if (hd.kind && !rec.touched.type) rec.type = hd.kind;
+        if (hd.stn && !rec.touched.code && rec.code.length === 15 && rec.code[10] === hd.stn) rec.codeSoft = rec.codeSoft.replace(/派出所代號 O 和 9[^。]*。 ?/, "");
+        if (hd.stn && !rec.touched.code && rec.code.length === 15 && rec.code[10] !== hd.stn) {
+          const old = rec.code[10]; rec.code = rec.code.slice(0, 10) + hd.stn + rec.code.slice(11);
+          rec.codeSoft = "派出所代號依單子標題「" + hd.name + (hd.name === "交通" ? "分隊" : "派出所") + "」由 " + old + " 改成 " + hd.stn + "。" + (rec.codeSoft ? " " + rec.codeSoft : "");
+        }
+      } catch (e) { /* 中文辨識失敗時維持原判斷 */ }
+    }
+    if ((rec.type === "cap" || rec.type === "xfer") && worker && !rec.touched.cat) {
       try { const c = await ocrCat(full); if (c) { rec.cat = c; rec.catFlag = "自動辨識，請核對"; } else rec.catFlag = "沒讀到，請照單子上的「觸犯法條」輸入"; }
       catch (e) { rec.catFlag = "無法辨識中文（" + (e && e.message ? e.message : e) + "），請手動輸入"; }
     }
@@ -620,7 +721,7 @@
   /* 一個檔案就是同一天：檔名日期 > 該檔多數頁讀到的貼紙日期 > 預設日期 > 前一頁 */
   function applyDate(rec, maj) {
     if (rec.touched.date) return;
-    const nd = rec.nameDate, def = normDate($("#defDate").value), d = nd || maj || rec.ocrDate || def || prevDate(rec);
+    const nd = rec.nameDate, def = "", d = nd || maj || rec.ocrDate || prevDate(rec);
     rec.date = d || "";
     rec.dateFlag = !d ? "沒讀到日期，請輸入" : nd && maj && nd !== maj ? "檔名日期（" + nd + "）和貼紙多數日期（" + maj + "）不同，已採用檔名，請確認" : !(nd || maj || rec.ocrDate || def) ? "沿用前一頁的日期，請核對" : "";
   }
@@ -668,7 +769,7 @@
       } catch (e) { show("「" + f.name + "」無法開啟，可能已加密或損毀。", "err"); }
     }
     $("#fileInfo").textContent = "已加入 " + pages.length + " 頁";
-    $("#work").hidden = false; $("#tblBox").hidden = false;
+    { const first = $("#work").hidden; $("#work").hidden = false; $("#tblBox").hidden = false; if (first) $("#work").scrollIntoView({ block: "start" }); }
     renderTable(); runAll();
   }
   const drop = $("#drop");
@@ -682,15 +783,8 @@
   window.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
   window.addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) endOver(); });
   window.addEventListener("drop", (e) => { endOver(); if (!hasFiles(e)) return; e.preventDefault(); addPdfs(e.dataTransfer.files); });
-  $("#defDate").value = lsGet(KEY_D) || "";
-  $("#defDate").addEventListener("input", () => lsSet(KEY_D, $("#defDate").value));
-  $("#applyDate").addEventListener("click", () => {
-    const d = normDate($("#defDate").value); if (!d) { show("預設收文日期格式要像 2026/11/17。", "warn"); return; }
-    hide(); pages.forEach((p) => { p.date = d; p.dateFlag = ""; p.touched.date = true; }); renderForm(); renderTable();
-  });
-
   /* ================= 表單 ================= */
-  const F = { code: $("#code"), who: $("#who"), date: $("#date"), caseNo: $("#caseNo"), realWho: $("#realWho"), cat: $("#cat"), docNo: $("#docNo") };
+  const F = { occNo: $("#occNo"), code: $("#code"), who: $("#who"), date: $("#date"), caseNo: $("#caseNo"), realWho: $("#realWho"), cat: $("#cat"), docNo: $("#docNo") };
   function setImg(el, src) { if (src) { el.src = src; el.hidden = false; } else { el.removeAttribute("src"); el.hidden = true; } }
   function refreshStatus() {
     const r = pages[cur]; if (!r) return;
@@ -722,8 +816,8 @@
     F.date.value = r.date; setImg($("#dateImg"), r.dateImg);
     $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || (r.nameDate && r.date === r.nameDate ? "取自檔名" : "");
     $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
-    F.caseNo.value = r.caseNo; F.realWho.value = r.realWho;
-    $("#realHint").textContent = r.sticky ? "" : "沒有便條紙：實際承辦人會填成上面的承辦人，發生文號留空。";
+    F.caseNo.value = r.caseNo; F.occNo.value = r.occNo; F.realWho.value = r.realWho;
+    $("#realHint").textContent = r.sticky ? "" : "沒有便條紙：實際承辦人會填成上面的承辦人。";
     $("#capBox").hidden = r.type !== "cap" && r.type !== "xfer"; F.cat.value = r.cat; $("#fCat").classList.toggle("uncertain", !!r.catFlag); $("#catNote").textContent = r.catFlag || ""; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
     $("#fDoc").classList.toggle("uncertain", !!r.docFlag); $("#docNote").textContent = r.docFlag || "";
     $("#skip").checked = r.skip;
@@ -731,14 +825,20 @@
     refreshStatus(); refreshWho(); renderTable();
   }
   const isUnc = (r) => !r.skip && ((r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag || r.catFlag);
+  function markOk(r) {
+    if (!r) return;
+    r.codeFlags = []; r.codeSoft = ""; r.dateFlag = ""; r.docFlag = ""; r.catFlag = ""; r.verified = true;
+  }
   function goWarn() {
     for (let k = 1; k <= pages.length; k++) { const i = (cur + k) % pages.length; if (isUnc(pages[i])) { go(i); return; } }
     $("#msg").textContent = "沒有需要核對（⚠）的頁面了。";
   }
-  function go(i) { if (i < 0 || i >= pages.length) return; cur = i; $("#viewer").classList.remove("zoom"); renderForm(); $("#viewer").scrollTop = 0; }
+  function go(i) { if (i < 0 || i >= pages.length) return; cur = i; $("#viewer").classList.remove("zoom"); renderForm(); $("#viewer").scrollTop = 0; $("#panel").scrollTop = 0; }
   $("#prev").addEventListener("click", () => go(cur - 1));
   $("#next").addEventListener("click", () => go(cur + 1));
   $("#nextWarn").addEventListener("click", goWarn);
+  $("#okBtn").addEventListener("click", () => { markOk(pages[cur]); renderForm(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && pages[cur]) { e.preventDefault(); markOk(pages[cur]); go(cur + 1); renderTable(); } });
   document.addEventListener("keydown", (e) => { if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); } else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); } });
   $("#viewer").addEventListener("click", () => $("#viewer").classList.toggle("zoom"));
 
@@ -749,7 +849,8 @@
   bind("who"); bind("realWho");
   $("#stripImg").addEventListener("click", (e) => { const s = e.target.style; const big = s.maxHeight === "900px"; s.maxHeight = big ? "" : "900px"; s.cursor = big ? "zoom-in" : "zoom-out"; });
   bind("date", (r) => { r.dateFlag = ""; $("#fDate").classList.remove("uncertain"); $("#dateNote").textContent = ""; });
-  bind("caseNo", (r) => { r.caseNo = F.caseNo.value.replace(/\D/g, ""); });
+  bind("caseNo", (r) => { r.caseNo = F.caseNo.value.trim(); });
+  bind("occNo", (r) => { r.occNo = F.occNo.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
   bind("cat", (r) => { r.catFlag = ""; $("#fCat").classList.remove("uncertain"); $("#catNote").textContent = ""; });
   $("#catOcr").addEventListener("click", () => { const r = pages[cur]; if (r) { r.touched.cat = false; runCat(r); } });
   bind("docNo", (r) => { r.docNo = F.docNo.value.replace(/\D/g, ""); r.docFlag = ""; $("#fDoc").classList.remove("uncertain"); $("#docNote").textContent = ""; });
@@ -760,8 +861,8 @@
   function whoEnter(key, next) {
     F[key].addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return; e.preventDefault(); const r = pages[cur], c = cands(F[key].value);
-      if (key === "who" && r.type === "xfer") { if (r.who.trim()) go(cur + 1); return; }
-      if (roster.includes(r[key])) { if (next) go(cur + 1); return; }
+      if (key === "who" && r.type === "xfer") { if (r.who.trim()) { markOk(r); go(cur + 1); renderTable(); } return; }
+      if (roster.includes(r[key])) { if (next) { markOk(r); go(cur + 1); renderTable(); } return; }
       if (c.length === 1) { r[key] = c[0]; r.touched[key] = true; F[key].value = c[0]; refreshWho(); renderTable(); }
       else if (!c.length && F[key].value.trim()) { $("#whoNote").textContent = key === "who" ? "名單裡找不到含有這個字的人。" : ""; }
     });
@@ -771,7 +872,7 @@
   /* ================= 表格與匯出 ================= */
   function derive(r) {
     const cap = r.type === "cap" || r.type === "xfer", real = r.sticky && r.realWho ? r.realWho : r.who;
-    return [r.who, r.code, "", r.sticky ? r.caseNo : "", real, cap ? r.cat : "", cap ? r.docNo : "", r.date];
+    return [r.who, r.code, r.occNo, r.caseNo, real, cap ? r.cat : "", cap ? r.docNo : "", r.date];
   }
   function renderTable() {
     const tb = $("#tbl tbody"); if (!tb) return;
@@ -787,7 +888,8 @@
     }).join("");
     const unc = pages.filter(isUnc).length;
     $("#tblHint").textContent = pages.length ? (miss ? "還有 " + miss + " 個必填欄位是空的（紅字「缺」）。" : "必填欄位都已填寫。") + (unc ? " ⚠ 表示有 " + unc + " 頁的案號、日期或文號是自動猜的，建議逐頁核對。" : "") : "";
-    const rr = tb.querySelector("tr.cur"); if (rr) rr.scrollIntoView({ block: "nearest" });
+    const rr = tb.querySelector("tr.cur"), box = rr && rr.closest(".tw");
+    if (box) { const top = rr.offsetTop - 28, bot = rr.offsetTop + rr.offsetHeight; if (top < box.scrollTop) box.scrollTop = top; else if (bot > box.scrollTop + box.clientHeight) box.scrollTop = bot - box.clientHeight + 4; }
   }
   $("#tbl tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr"); if (tr) go(+tr.dataset.i); });
   const HEAD = ["承辦人", "E化案號", "發生案號", "發生文號", "實際承辦人", "案類", "文號", "收文日期"];
