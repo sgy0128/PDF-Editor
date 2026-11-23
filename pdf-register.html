@@ -125,9 +125,10 @@
   </div>
 
   <section class="box">
-    <h2>1. 承辦人名單</h2>
+    <h2>1. 承辦人名單（已內建，通常不用動）</h2>
     <div class="row" style="margin-top:0">
-      <button id="rosterFile" type="button">從「已陳報」Excel 讀取</button>
+      <button id="rosterFile" type="button">名單有異動時，從「已陳報」Excel 更新</button>
+      <button id="rosterReset" type="button">改回內建名單</button>
       <span id="rosterInfo" class="hint" style="margin:0"></span>
     </div>
     <input id="rosterIn" type="file" accept=".xlsx,.xls" hidden>
@@ -135,7 +136,7 @@
       <textarea id="rosterTxt" spellcheck="false" placeholder="涂石榕&#10;張佳穎&#10;…"></textarea>
       <div class="row"><button id="rosterSave" type="button">使用這份名單</button></div>
     </details>
-    <p class="hint">手寫的字只要打名字裡的任何一個字，就會列出名單裡符合的人。名字一律取自名單，不會重新打字。</p>
+    <p class="hint">名單已預先放入工具，不用每次載入。有人員異動才需要更新。手寫的字只要打名字裡的任何一個字，就會列出名單裡符合的人。名字一律取自名單，不會重新打字。</p>
   </section>
 
   <section class="box">
@@ -247,7 +248,7 @@
   "use strict";
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const KEY_R = "pdf-register-roster", KEY_C = "pdf-register-cats", KEY_D = "pdf-register-defdate";
+  const KEY_R = "pdf-register-roster2", KEY_C = "pdf-register-cats", KEY_D = "pdf-register-defdate";
   const STN = { O1: "土城", P1: "廣福", Q1: "清水", M1: "金城", R1: "頂埔" };
   const msg = $("#msg");
   function show(t, k) { msg.textContent = t; msg.className = "show" + (k ? " " + k : ""); }
@@ -365,10 +366,12 @@
   const url = (c, q) => c.toDataURL("image/jpeg", q || 0.85);
 
   /* ================= 名單 ================= */
+  /* 內建名單：取自「已陳報」Excel 的未結件數統計（承辦人欄，23 人），名字為原字串 */
+  const BUILTIN = ["涂石榕", "張佳穎", "黃富群", "孫利生", "吳柏翰", "陳致憲", "王昱侑", "朱晋廷", "林德愷", "高玉庭", "鄭耘", "林文華", "黃昭貴", "陳柏豪", "吳柏霆", "姚柏翔", "翁嘉偉", "林奕丞", "李原豪", "李堃晢", "林冠宇", "張淵普", "周渝宸"];
   let roster = [];
   function setRoster(list, from) {
     roster = Array.from(new Set(list.map((s) => String(s).trim()).filter(Boolean)));
-    lsSet(KEY_R, JSON.stringify(roster));
+    lsSet(KEY_R, JSON.stringify({ list: roster, from: from || "" }));
     $("#rosterInfo").textContent = roster.length ? "已載入 " + roster.length + " 人" + (from ? "（" + from + "）" : "") : "尚未載入名單";
     $("#rosterTxt").value = roster.join("\n");
     refreshWho();
@@ -405,7 +408,6 @@
   $("#rosterFile").addEventListener("click", () => $("#rosterIn").click());
   $("#rosterIn").addEventListener("change", function () { const f = this.files[0]; this.value = ""; if (f) readRosterFile(f); });
   $("#rosterSave").addEventListener("click", () => { const l = $("#rosterTxt").value.split(/[\n,，、\s]+/); setRoster(l, "手動貼上"); hide(); });
-  try { const r = JSON.parse(lsGet(KEY_R) || "[]"); if (r.length) setRoster(r, "上次使用"); else $("#rosterInfo").textContent = "尚未載入名單"; } catch (e) { $("#rosterInfo").textContent = "尚未載入名單"; }
 
   /* ================= 頁面資料 ================= */
   let docs = [], pages = [], cur = -1, ocrStop = false, ocrRunning = false, worker = null;
@@ -415,6 +417,14 @@
     skip: false, touched: {}
   });
   const cands = (q) => { q = String(q).trim(); if (!q) return []; return roster.filter((n) => Array.from(q).every((ch) => n.includes(ch))); };
+
+  /* 名單初始化（需在 pages 宣告之後） */
+  $("#rosterReset").addEventListener("click", () => { setRoster(BUILTIN, "內建"); hide(); });
+  try {
+    const r = JSON.parse(lsGet(KEY_R) || "null");
+    if (r && r.list && r.list.length && r.from && r.from !== "內建") setRoster(r.list, r.from + "，上次使用"); else setRoster(BUILTIN, "內建");
+  } catch (e) { setRoster(BUILTIN, "內建"); }
+
 
   /* ---------- 辨識 ---------- */
   async function ensureOcr() {
