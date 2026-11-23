@@ -121,6 +121,7 @@
 <main>
   <div>
     <h1>陳報單登記</h1>
+    <p class="sub">辨識強化版：支援左下／右下條碼定位，並對低信心案號進行補讀。</p>
     <p class="sub">把掃描的陳報單、呈報單 PDF 放進來，自動讀出案號與收文資料，你只需核對手寫的部分，最後複製貼到 Excel 的登記表。全程在瀏覽器內處理，檔案不會上傳。</p>
   </div>
 
@@ -166,6 +167,7 @@
         <button id="prev" type="button">◀ 上一頁</button>
         <div class="pg"><span id="pgNo"></span><div class="st" id="pgSt"></div></div>
         <button id="next" type="button">下一頁 ▶</button>
+        <button id="nextWarn" type="button" title="跳到下一個需要核對（⚠）的頁面">下一個 ⚠</button>
       </div>
 
       <div class="radios">
@@ -280,7 +282,7 @@
       o += "AD";
       if (!/[1IL]/.test(t[9])) fl.push("分局代號第 3 碼不是 1");
       o += "1";
-      let st = t[10] === "0" ? "O" : t[10];
+      let st = (t[10] === "0" || t[10] === "9") ? "O" : t[10];
       if (!/[OPQMR]/.test(st)) fl.push("派出所代號不在 O/P/Q/M/R");
       o += st;
       if (!/[1IL]/.test(t[11])) fl.push("派出所代號第 2 碼不是 1");
@@ -299,21 +301,30 @@
     }
     return best;
   }
-  /* 收文日期只可能是今年或去年（民國），讀成別的年份一律當作讀錯 */
+  /* 收文日期：允許民國今年前兩年到明年，並檢查實際月日，避免跨年度後全部誤判 */
   function parseDate(s) {
-    const m = String(s).match(/(1[0-3]\d)\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
+    const m = String(s).match(/(1[0-4]\d)\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
     if (!m) return "";
     const cy = new Date().getFullYear() - 1911;
-    if (+m[1] < cy - 1 || +m[1] > cy) return "";
-    const y = +m[1] + 1911, mo = +m[2], d = +m[3];
-    if (mo < 1 || mo > 12 || d < 1 || d > 31) return "";
+    const roc = +m[1], mo = +m[2], d = +m[3], y = roc + 1911;
+    if (roc < cy - 2 || roc > cy + 1 || mo < 1 || mo > 12) return "";
+    const lastDay = new Date(y, mo, 0).getDate();
+    if (d < 1 || d > lastDay) return "";
     return y + "/" + String(mo).padStart(2, "0") + "/" + String(d).padStart(2, "0");
   }
-  const normDate = (s) => { const m = String(s).trim().match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/); return m ? m[1] + "/" + m[2].padStart(2, "0") + "/" + m[3].padStart(2, "0") : ""; };
+  const normDate = (s) => {
+    const m = String(s).trim().match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/);
+    if (!m) return "";
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if (mo < 1 || mo > 12 || d < 1 || d > new Date(y, mo, 0).getDate()) return "";
+    return y + "/" + String(mo).padStart(2, "0") + "/" + String(d).padStart(2, "0");
+  };
   /* 檔名裡的日期，例如「1151118公文.pdf」→ 2026/11/18 */
   function fileDate(name) {
-    const m = String(name).match(/(1[0-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
-    return m ? (+m[1] + 1911) + "/" + m[2] + "/" + m[3] : "";
+    const m = String(name).match(/(1[0-4]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
+    if (!m) return "";
+    const y = +m[1] + 1911, mo = +m[2], d = +m[3];
+    return d <= new Date(y, mo, 0).getDate() ? y + "/" + m[2] + "/" + m[3] : "";
   }
   /* 從「觸犯法條」那一列讀出案類；讀不到就找內文的「依○○罪」 */
   function parseCat(text) {
@@ -326,7 +337,8 @@
     const m2 = lines.join("").match(/依([\u4e00-\u9fff、]{2,24}?)罪/);
     return m2 ? clean(m2[1]) : "";
   }
-  function parseDoc(s) { const m = String(s).replace(/\s/g, "").match(/115\d{7}/); return m ? m[0] : ""; }
+  /* 文號為民國三碼年 + 七碼流水號；不把年份寫死為 115 */
+  function parseDoc(s) { const m = String(s).replace(/\D/g, "").match(/11\d{8}/); return m ? m[0] : ""; }
 
   /* ================= 圖像處理 ================= */
   function cropC(c, x0, y0, x1, y1, scale) {
@@ -336,7 +348,7 @@
   function cropPx(c, x, y, w, h, scale) {
     x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y)); w = Math.max(1, Math.min(c.width - x, Math.ceil(w))); h = Math.max(1, Math.min(c.height - y, Math.ceil(h)));
     const o = document.createElement("canvas"); o.width = Math.max(1, Math.round(w * (scale || 1))); o.height = Math.max(1, Math.round(h * (scale || 1)));
-    const g = o.getContext("2d"); g.imageSmoothingQuality = "high"; g.fillStyle = "#fff"; g.fillRect(0, 0, o.width, o.height);
+    const g = o.getContext("2d", { willReadFrequently: true }); g.imageSmoothingQuality = "high"; g.fillStyle = "#fff"; g.fillRect(0, 0, o.width, o.height);
     g.drawImage(c, x, y, w, h, 0, 0, o.width, o.height); return o;
   }
   function runs(arr, thr, gap) {
@@ -348,31 +360,72 @@
     if (s >= 0) out.push([s, last]);
     return out;
   }
-  /* 右下角：找出條碼，其上方是收文日期、下方是文號 */
+  /* 條碼位置會因表單版型落在左下或右下；雙側掃描並用條碼列密度選出位置 */
   function analyzeBottom(c) {
-    const w = c.width, h = c.height, x0 = Math.floor(w * 0.70), x1 = Math.floor(w * 0.99), y0 = Math.floor(h * 0.80), rw = x1 - x0, rh = h - y0;
-    if (rw < 50 || rh < 50) return null;
-    const d = c.getContext("2d").getImageData(x0, y0, rw, rh).data, rows = new Int32Array(rh), colN = new Int32Array(rw), isDark = (i) => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 < 140;
-    for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) if (isDark((y * rw + x) * 4)) colN[x]++;
-    /* 掃描時邊緣的黑邊會讓整欄都是黑的，先排除 */
-    const skip = Array.from(colN, (n) => n > 0.55 * rh);
-    for (let y = 0; y < rh; y++) { let n = 0; for (let x = 0; x < rw; x++) if (!skip[x] && isDark((y * rw + x) * 4)) n++; rows[y] = n; }
-    const bars = runs(Array.from(rows, (v) => (v > 0.30 * rw ? 1 : 0)), 0, 3).filter((r) => r[1] - r[0] > h * 0.012);
-    if (!bars.length) return null;
-    const br = bars.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a));
-    const thr = Math.max(3, Math.floor(0.03 * rw));
-    const below = runs(Array.from(rows.slice(br[1] + 1)), thr, 4).map((r) => [r[0] + br[1] + 1, r[1] + br[1] + 1]).filter((r) => r[1] - r[0] >= 12);
-    const above = runs(Array.from(rows.slice(0, br[0])), thr, 4).filter((r) => r[1] - r[0] >= 14);
-    const res = {};
+    const w = c.width, h = c.height, y0 = Math.floor(h * 0.62), rh = h - y0;
+    if (w < 100 || rh < 60) return null;
+    const ranges = [[0.18, 0.62], [0.38, 0.98]];
+    let best = null;
+    for (const range of ranges) {
+      const x0 = Math.floor(w * range[0]), x1 = Math.floor(w * range[1]), rw0 = x1 - x0;
+      if (rw0 < 50) continue;
+      const data = c.getContext("2d").getImageData(x0, y0, rw0, rh).data;
+      const rows = new Int32Array(rh), colN = new Int32Array(rw0);
+      const isDark = (i) => data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 < 150;
+      for (let y = 0; y < rh; y++) for (let x = 0; x < rw0; x++) if (isDark((y * rw0 + x) * 4)) colN[x]++;
+      /* 排除掃描邊緣、裝訂線等整段黑邊 */
+      const skip = Array.from(colN, (n) => n > 0.60 * rh);
+      const active = skip.reduce((n, v) => n + (v ? 0 : 1), 0);
+      if (active < 40) continue;
+      for (let y = 0; y < rh; y++) {
+        let n = 0;
+        for (let x = 0; x < rw0; x++) if (!skip[x] && isDark((y * rw0 + x) * 4)) n++;
+        rows[y] = n;
+      }
+      /* 左側條碼在整個搜尋區中通常只佔約 15%～20%，30% 門檻會漏掉 */
+      const bars = runs(Array.from(rows, (v) => (v > 0.12 * active ? 1 : 0)), 0, 3)
+        .filter((r) => r[1] - r[0] > h * 0.012 && r[1] - r[0] < h * 0.075);
+      for (const br of bars) {
+        let density = 0;
+        for (let y = br[0]; y <= br[1]; y++) density += rows[y] / active;
+        density /= (br[1] - br[0] + 1);
+        const score = (br[1] - br[0] + 1) * density;
+        if (!best || score > best.score) best = { score, x0, rw: rw0, y0, rows, active, br };
+      }
+    }
+    if (!best) return null;
+    const { x0, rw, rows, active, br } = best;
     const unit = h / 3508;
-    if (below.length) { const r = below[0], top = Math.max(r[0], r[1] - Math.round(40 * unit)); res.num = [x0, y0 + top - 4, rw, r[1] - top + 10]; }
-    if (above.length) { const r = above[above.length - 1], top = Math.max(r[0], r[1] - Math.round(60 * unit)); res.date = [x0 + rw * 0.5, y0 + top - 5, rw * 0.5, r[1] - top + 10]; }
+    const textThr = Math.max(2, Math.floor(0.012 * active));
+    const above = runs(Array.from(rows.slice(0, br[0])), textThr, 4)
+      .filter((r) => r[1] - r[0] >= Math.max(5, h * 0.003));
+    const below = runs(Array.from(rows.slice(br[1] + 1)), textThr, 4)
+      .map((r) => [r[0] + br[1] + 1, r[1] + br[1] + 1])
+      .filter((r) => r[1] - r[0] >= Math.max(5, h * 0.003));
+    const res = {};
+    if (above.length) {
+      const r = above[above.length - 1];
+      const top = Math.max(r[0], r[1] - Math.round(70 * unit));
+      res.date = [x0, best.y0 + top - 4, rw, Math.max(1, r[1] - top + 12)];
+    } else {
+      const top = Math.max(0, br[0] - Math.round(78 * unit));
+      res.date = [x0, best.y0 + top, rw, Math.max(1, br[0] - top - 2)];
+    }
+    if (below.length) {
+      const r = below[0];
+      res.num = [x0, best.y0 + Math.max(br[1] + 1, r[0] - 3), rw,
+        Math.max(1, r[1] - r[0] + 12)];
+    } else {
+      /* 數字列很淡時投影可能抓不到，仍提供條碼下方區塊讓 OCR 嘗試 */
+      const top = best.y0 + br[1] + 2;
+      res.num = [x0, top, rw, Math.max(1, Math.min(Math.round(85 * unit), h - top))];
+    }
     return res;
   }
   /* 便條紙（黃橙色）偵測 */
   function findSticky(c) {
     const sw = 400, sh = Math.round(c.height * sw / c.width), s = document.createElement("canvas"); s.width = sw; s.height = sh;
-    const g = s.getContext("2d"); g.drawImage(c, 0, 0, sw, sh);
+    const g = s.getContext("2d", { willReadFrequently: true }); g.drawImage(c, 0, 0, sw, sh);
     const d = g.getImageData(0, 0, sw, sh).data, B = 8, bw = Math.floor(sw / B), bh = Math.floor(sh / B), cnt = new Int32Array(bw * bh);
     for (let y = 0; y < bh * B; y++) for (let x = 0; x < bw * B; x++) {
       const i = (y * sw + x) * 4, r = d[i], gg = d[i + 1], b = d[i + 2];
@@ -469,20 +522,27 @@
   }
   const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   async function ocrCode(full) {
-    const top = cropC(full, 0.30, 0, 1, 0.24, 1);
+    /* 案號在表單上緣右側；保留較寬範圍，避免不同版型的欄位起點位移 */
+    const top = cropC(full, 0.24, 0, 1, 0.27, 1);
     const d1 = await recog(top, ALNUM, 11, true);
     let box = null;
     for (const l of linesOf(d1)) {
-      const s = String(l.text || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      if (s.length >= 10 && /Z[1IL]{2}5|AD[1IL]|[1I]{2}[59]/.test(s) && l.bbox) { box = l.bbox; break; }
+      const v = String(l.text || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      if (v.length >= 10 && /Z[1IL]{2}5|AD[1IL]|[1I]{2}[59]/.test(v) && l.bbox) { box = l.bbox; break; }
     }
     let best = fixCode(d1.text || "");
     let crop = null;
     if (box) {
-      const p = 14, w = box.x1 - box.x0 + 2 * p + 70, h = box.y1 - box.y0 + 2 * p;
-      crop = cropPx(top, box.x0 - p, box.y0 - p, w, h, 2);
+      const p = 16, bw = box.x1 - box.x0 + 2 * p + 70, bh = box.y1 - box.y0 + 2 * p;
+      crop = cropPx(top, box.x0 - p, box.y0 - p, bw, bh, 2);
       const d2 = await recog(crop, ALNUM, 7, false), r2 = fixCode(d2.text || "");
       if (r2 && (!best || r2.sc <= best.sc)) best = r2;
+    }
+    /* 第一輪沒有找到完整案號或有格式疑點時，放大上緣再以單區塊模式補讀一次 */
+    if (!best || best.sc > 0) {
+      const enlarged = cropPx(top, 0, 0, top.width, top.height, 1.6);
+      const d3 = await recog(enlarged, ALNUM, 6, false), r3 = fixCode(d3.text || "");
+      if (r3 && (!best || r3.sc < best.sc)) { best = r3; if (!crop) crop = enlarged; }
     }
     return { best, img: crop ? url(crop, 0.9) : "" };
   }
@@ -490,7 +550,7 @@
     const doc = docs[rec.fi], pg = await doc.getPage(rec.n), v0 = pg.getViewport({ scale: 1 });
     const sc = Math.min(3.5, 2480 / v0.width), vp = pg.getViewport({ scale: sc }), full = document.createElement("canvas");
     full.width = Math.floor(vp.width); full.height = Math.floor(vp.height);
-    const g = full.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, full.width, full.height);
+    const g = full.getContext("2d", { willReadFrequently: true }); g.fillStyle = "#fff"; g.fillRect(0, 0, full.width, full.height);
     await pg.render({ canvasContext: g, viewport: vp }).promise;
     pg.cleanup();
     return full;
@@ -545,6 +605,7 @@
         if (bt && bt.num && !rec.touched.docNo) {
           const c = cropPx(full, bt.num[0], bt.num[1], bt.num[2], bt.num[3], 3), d = await recog(c, "0123456789", 7, false), dn = parseDoc(d.text || "");
           if (dn) { rec.docNo = dn; rec.docFlag = "自動辨識，請核對"; }
+          else rec.docFlag = "已定位條碼，但文號未完整讀出，請對照圖片確認";
         }
       } catch (e) { rec.err = "辨識失敗：" + (e && e.message ? e.message : e); }
     }
@@ -669,9 +730,15 @@
     $("#prev").disabled = cur <= 0; $("#next").disabled = cur >= pages.length - 1;
     refreshStatus(); refreshWho(); renderTable();
   }
+  const isUnc = (r) => !r.skip && ((r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag || r.catFlag);
+  function goWarn() {
+    for (let k = 1; k <= pages.length; k++) { const i = (cur + k) % pages.length; if (isUnc(pages[i])) { go(i); return; } }
+    $("#msg").textContent = "沒有需要核對（⚠）的頁面了。";
+  }
   function go(i) { if (i < 0 || i >= pages.length) return; cur = i; $("#viewer").classList.remove("zoom"); renderForm(); $("#viewer").scrollTop = 0; }
   $("#prev").addEventListener("click", () => go(cur - 1));
   $("#next").addEventListener("click", () => go(cur + 1));
+  $("#nextWarn").addEventListener("click", goWarn);
   document.addEventListener("keydown", (e) => { if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); } else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); } });
   $("#viewer").addEventListener("click", () => $("#viewer").classList.toggle("zoom"));
 
@@ -718,7 +785,7 @@
       return '<tr data-i="' + i + '" class="' + (i === cur ? "cur " : "") + (r.skip ? "skip" : "") + '"><td>' + (i + 1) + "</td><td>" + esc(r.src) + (r.status === "ok" ? "" : r.status === "busy" ? "（辨識中）" : r.status === "err" ? "（失敗）" : "（等待）") + (unc ? " ⚠" : "") + "</td><td>" + (r.type === "xfer" ? "移轉" : cap ? "破獲" : "發生") + "</td>" +
         td(0, v[0]) + td(1, v[1]) + td(2, v[2]) + td(3, v[3]) + td(4, v[4]) + td(5, v[5]) + td(6, v[6]) + td(7, v[7]) + "</tr>";
     }).join("");
-    const unc = pages.filter((r) => !r.skip && ((r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag)).length;
+    const unc = pages.filter(isUnc).length;
     $("#tblHint").textContent = pages.length ? (miss ? "還有 " + miss + " 個必填欄位是空的（紅字「缺」）。" : "必填欄位都已填寫。") + (unc ? " ⚠ 表示有 " + unc + " 頁的案號、日期或文號是自動猜的，建議逐頁核對。" : "") : "";
     const rr = tb.querySelector("tr.cur"); if (rr) rr.scrollIntoView({ block: "nearest" });
   }
