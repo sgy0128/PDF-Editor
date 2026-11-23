@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>陳報單登記</title>
+<script>(function(){var t=null,m=location.search.match(/[?&]theme=(dark|light)/);try{if(m){t=m[1];localStorage.setItem("pdf-tools-theme",t)}else t=localStorage.getItem("pdf-tools-theme")}catch(e){if(m)t=m[1]}document.documentElement.dataset.theme=t==="dark"?"dark":"light"})();</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f855a'/%3E%3Cpath d='M20 10h18l12 12v28a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V14a4 4 0 0 1 4-4z' fill='white'/%3E%3Cpath d='M23 30h18M23 37h18M23 44h11' stroke='%232f855a' stroke-width='3.5' stroke-linecap='round'/%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fbfcfe; --panel: #ffffff; --fg: #19263a; --muted: #5d6b82; --line: #e3e9f2; --stage: #e4eaf3;
+    --accent: #2f855a; --accent-fg: #ffffff; --accent-soft: #e2f4ea;
+    --danger: #c62828; --danger-soft: #fdecec; --warn: #7a5a00; --warn-bg: #fff4d6;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1724; --panel: #172133; --fg: #e7edf7; --muted: #94a3bb; --line: #2a3750; --stage: #0b111c;
+    --accent: #7ee2a8; --accent-fg: #0b1220; --accent-soft: #17382a;
+    --danger: #ff8a80; --danger-soft: #3a1f24; --warn: #f0cf7a; --warn-bg: #3a3014;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  .sub { color: var(--muted); margin: 0; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; padding: 9px 20px; }
+  input[type=text], textarea, select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; min-width: 0; }
+  textarea { min-height: 96px; resize: vertical; }
+  label.f { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); margin-top: 10px; }
+  label.chk { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: .9rem; }
+  label.chk input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .radios { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .radios label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .radios input { accent-color: var(--accent); }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+  .hint { color: var(--muted); font-size: .82rem; margin: 6px 0 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  #msg { padding: 10px 12px; border-radius: 6px; background: var(--accent-soft); display: none; word-break: break-all; }
+  #msg.show { display: block; }
+  #msg.err { background: var(--danger-soft); color: var(--danger); }
+  #msg.warn { background: var(--warn-bg); color: var(--warn); }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; padding: 22px 16px; text-align: center; cursor: pointer; transition: .15s; }
+  #drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  #drop strong { display: block; margin-bottom: 2px; }
+  #drop span { color: var(--muted); font-size: .9rem; }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 10px; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .work { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(340px, .85fr); gap: 16px; align-items: start; }
+  .viewer { background: var(--stage); border: 1px solid var(--line); border-radius: 10px; height: 82vh; overflow: auto; position: sticky; top: 8px; }
+  .viewer img { display: block; width: 100%; cursor: zoom-in; }
+  .viewer.zoom img { width: 220%; cursor: zoom-out; }
+  .nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .nav .pg { flex: 1; text-align: center; font-weight: 600; }
+  .st { font-size: .8rem; color: var(--muted); text-align: center; }
+  .field { margin-top: 12px; }
+  .field > .lb { display: flex; justify-content: space-between; font-size: .85rem; color: var(--muted); margin-bottom: 4px; }
+  .field .note { font-size: .8rem; margin-top: 3px; color: var(--muted); }
+  .field.uncertain input[type=text] { border-color: var(--warn); background: var(--warn-bg); }
+  .field.uncertain .note { color: var(--warn); }
+  .field.bad input[type=text] { border-color: var(--danger); background: var(--danger-soft); }
+  .field.bad .note { color: var(--danger); }
+  .crop { display: block; max-width: 100%; max-height: 90px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .strip { display: block; max-height: 300px; max-width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chips button { padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); border-color: var(--accent); }
+  .grp { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  th, td { border-bottom: 1px solid var(--line); padding: 5px 7px; text-align: left; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  tr.cur td { background: var(--accent-soft); }
+  tr.skip td { opacity: .45; text-decoration: line-through; }
+  tr { cursor: pointer; }
+  td.miss { color: var(--danger); }
+  td.unc { background: var(--warn-bg); }
+  .tw { max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-top: 8px; }
+  @media (max-width: 900px) { .work { grid-template-columns: 1fr; } .viewer { position: static; height: 60vh; } }
+  .theme-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--panel); color: var(--fg); font: inherit; font-size: .85rem; cursor: pointer; white-space: nowrap; }
+  .theme-btn:hover { border-color: var(--accent); }
+  .theme-btn svg { width: 16px; height: 16px; }
+  .theme-btn .i-sun, .theme-btn .lbl-light { display: none; }
+  :root[data-theme="dark"] .theme-btn .i-sun, :root[data-theme="dark"] .theme-btn .lbl-light { display: inline; }
+  :root[data-theme="dark"] .theme-btn .i-moon, :root[data-theme="dark"] .theme-btn .lbl-dark { display: none; }
+  .home { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 5px 14px 5px 6px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--fg);
+    text-decoration: none; font-size: .88rem; font-weight: 600; white-space: nowrap; transition: border-color .15s, color .15s; }
+  .home .hi { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; }
+  .home .hi svg { width: 14px; height: 14px; }
+  .home:hover, .home:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .home:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
+</style>
+</head>
+<body>
+<main>
+  <div class="topbar"><a class="home" data-nav="index.html" href="index.html" title="回到工具箱首頁"><span class="hi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>工具箱首頁</a><button class="theme-btn" id="themeBtn" type="button" aria-label="切換深色或淺色主題" title="切換深色或淺色主題"><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span class="lbl-dark">深色</span><span class="lbl-light">淺色</span></button></div>
+  <div>
+    <h1>陳報單登記</h1>
+    <p class="sub">把掃描的陳報單、呈報單 PDF 放進來，自動讀出案號與收文資料，你只需核對手寫的部分，最後複製貼到 Excel 的登記表。全程在瀏覽器內處理，檔案不會上傳。</p>
+  </div>
+
+  <section class="box">
+    <h2>1. 承辦人名單</h2>
+    <div class="row" style="margin-top:0">
+      <button id="rosterFile" type="button">從「已陳報」Excel 讀取</button>
+      <span id="rosterInfo" class="hint" style="margin:0"></span>
+    </div>
+    <input id="rosterIn" type="file" accept=".xlsx,.xls" hidden>
+    <details id="rosterDet"><summary>讀不到時，改為貼上名單（一行一個名字）</summary>
+      <textarea id="rosterTxt" spellcheck="false" placeholder="涂石榕&#10;張佳穎&#10;…"></textarea>
+      <div class="row"><button id="rosterSave" type="button">使用這份名單</button></div>
+    </details>
+    <p class="hint">手寫的字只要打名字裡的任何一個字，就會列出名單裡符合的人。名字一律取自名單，不會重新打字。</p>
+  </section>
+
+  <section class="box">
+    <h2>2. 加入 PDF</h2>
+    <div id="drop" tabindex="0" role="button" aria-label="選擇或拖曳 PDF">
+      <strong>把掃描的 PDF 拖到這裡</strong>
+      <span>可一次放多個檔案，也可以點這裡選擇檔案。</span>
+    </div>
+    <input id="pdfIn" type="file" accept="application/pdf,.pdf" multiple hidden>
+    <div class="two">
+      <label class="f">預設收文日期（讀不出日期時使用，格式 2026/11/17）<input id="defDate" type="text" spellcheck="false" placeholder="2026/11/17"></label>
+      <div class="row" style="align-self:end"><button id="applyDate" type="button">把這個日期套用到全部頁</button></div>
+    </div>
+    <div class="row">
+      <span id="fileInfo" class="hint" style="margin:0"></span>
+      <button id="stopOcr" type="button" hidden>停止辨識</button>
+    </div>
+    <div class="bar" id="progBar" hidden><i id="prog"></i></div>
+    <p class="hint" id="progTxt"></p>
+    <div id="msg" role="status"></div>
+  </section>
+
+  <section class="work" id="work" hidden>
+    <div class="viewer" id="viewer"><img id="pageImg" alt="目前頁面（點一下放大）"></div>
+    <div class="box" id="panel">
+      <div class="nav">
+        <button id="prev" type="button">◀ 上一頁</button>
+        <div class="pg"><span id="pgNo"></span><div class="st" id="pgSt"></div></div>
+        <button id="next" type="button">下一頁 ▶</button>
+      </div>
+
+      <div class="radios">
+        <label><input type="radio" name="type" value="occ">發生卷（陳報單）</label>
+        <label><input type="radio" name="type" value="cap">破獲卷（呈報單，有嫌疑人）</label>
+      </div>
+
+      <div class="field" id="fCode">
+        <div class="lb"><span id="codeLb">E化案號</span><span id="codeStn"></span></div>
+        <img class="crop" id="codeImg" alt="" hidden>
+        <input id="code" type="text" spellcheck="false" autocomplete="off">
+        <div class="note" id="codeNote"></div>
+      </div>
+
+      <div class="field" id="fWho">
+        <div class="lb"><span>承辦人（右邊緣手寫的字）</span></div>
+        <img class="strip" id="stripImg" alt="" hidden>
+        <input id="who" type="text" spellcheck="false" autocomplete="off" placeholder="輸入名字裡的一個字，按 Enter 選取；再按 Enter 到下一頁">
+        <div class="chips" id="whoChips"></div>
+        <div class="note" id="whoNote"></div>
+      </div>
+
+      <div class="field" id="fDate">
+        <div class="lb"><span>收文日期（貼紙上的日期，西元）</span></div>
+        <img class="crop" id="dateImg" alt="" hidden>
+        <input id="date" type="text" spellcheck="false" autocomplete="off" placeholder="2026/11/17">
+        <div class="note" id="dateNote"></div>
+      </div>
+
+      <div class="grp">
+        <div class="field">
+          <label class="chk"><input type="checkbox" id="sticky">有便條紙</label>
+        </div>
+        <div id="stickyBox" hidden>
+          <img class="crop" id="stickyImg" alt="" hidden style="max-height:140px">
+          <div class="field"><div class="lb"><span>發生文號（便條紙上的數字）</span></div><input id="caseNo" type="text" spellcheck="false" autocomplete="off"></div>
+          <div class="field"><div class="lb"><span>實際承辦人（便條紙上的名字）</span></div>
+            <input id="realWho" type="text" spellcheck="false" autocomplete="off" placeholder="輸入名字裡的一個字">
+            <div class="chips" id="realChips"></div>
+          </div>
+        </div>
+        <p class="hint" id="realHint"></p>
+      </div>
+
+      <div class="grp" id="capBox" hidden>
+        <div class="field"><div class="lb"><span>案類（觸犯法條）</span></div>
+          <input id="cat" type="text" spellcheck="false" autocomplete="off" list="catList"><datalist id="catList"></datalist></div>
+        <div class="field" id="fDoc">
+          <div class="lb"><span>文號（收文條碼下方的數字）</span></div>
+          <img class="crop" id="docImg" alt="" hidden>
+          <input id="docNo" type="text" spellcheck="false" autocomplete="off">
+          <div class="note" id="docNote"></div>
+        </div>
+      </div>
+
+      <div class="grp row">
+        <label class="chk"><input type="checkbox" id="skip">略過此頁（不匯出）</label>
+      </div>
+      <p class="hint">快捷鍵：Alt + ← / → 切換頁面。在「承辦人」按 Enter 選取後，再按一次 Enter 會跳到下一頁。</p>
+    </div>
+  </section>
+
+  <section class="box" id="tblBox" hidden>
+    <h2>3. 檢查與匯出</h2>
+    <div class="tw"><table id="tbl"><thead><tr>
+      <th>#</th><th>來源</th><th>類型</th><th>承辦人</th><th>E化案號</th><th>發生案號</th><th>發生文號</th><th>實際承辦人</th><th>案類</th><th>文號</th><th>收文日期</th>
+    </tr></thead><tbody></tbody></table></div>
+    <p class="hint" id="tblHint"></p>
+    <div class="row">
+      <button id="copyBtn" class="primary" type="button">複製（貼到 Excel）</button>
+      <button id="xlsxBtn" type="button">下載 Excel</button>
+      <button id="csvBtn" type="button">下載 CSV</button>
+    </div>
+    <p class="hint">複製的欄位順序和你的登記表一致：承辦人、E化案號、發生案號、發生文號、實際承辦人、案類、文號、收文日期。直接貼到登記表第一個空白列的 A 欄，公式不會被蓋掉。</p>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const KEY_R = "pdf-register-roster", KEY_C = "pdf-register-cats", KEY_D = "pdf-register-defdate";
+  const STN = { O1: "土城", P1: "廣福", Q1: "清水", M1: "金城", R1: "頂埔" };
+  const msg = $("#msg");
+  function show(t, k) { msg.textContent = t; msg.className = "show" + (k ? " " + k : ""); }
+  function hide() { msg.className = ""; }
+  function tick() { return new Promise((r) => setTimeout(r, 0)); }
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+
+  if (!window.pdfjsLib) { show("無法載入 PDF 處理元件，請確認網路連線後重新整理頁面。", "err"); return; }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  /* ================= 純函式：案號、日期、文號 ================= */
+  const DMAP = { O: "0", Q: "0", D: "0", I: "1", L: "1", A: "1", S: "5", B: "8", Z: "2", G: "6", T: "7" };
+  const toDigit = (c) => (/\d/.test(c) ? c : DMAP[c] || c);
+  /* 規則：Z + 年(3) + 月(2) + 9 + AD1 + 派出所代號(O/P/Q/M/R + 1) + 末三碼（不會有 O） */
+  function fixCode(raw) {
+    const s = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, "");
+    let best = null;
+    for (let i = 0; i + 15 <= s.length; i++) {
+      if (s[i] !== "Z") continue;
+      const t = s.slice(i, i + 15), fl = [];
+      let o = "Z";
+      for (let p = 1; p <= 5; p++) o += toDigit(t[p]);
+      if (t[6] !== "9") fl.push("第 7 碼不是 9");
+      o += "9";
+      if (t[7] !== "A" || t[8] !== "D") fl.push("AD 讀得不確定");
+      o += "AD";
+      if (!/[1IL]/.test(t[9])) fl.push("分局代號第 3 碼不是 1");
+      o += "1";
+      let st = t[10] === "0" ? "O" : t[10];
+      if (!/[OPQMR]/.test(st)) fl.push("派出所代號不在 O/P/Q/M/R");
+      o += st;
+      if (!/[1IL]/.test(t[11])) fl.push("派出所代號第 2 碼不是 1");
+      o += "1";
+      let tail = "";
+      for (const c0 of t.slice(12)) {
+        let c = c0 === "O" ? "0" : c0;
+        if (/[1IL]/.test(c)) fl.push("末三碼的 I / 1 / L 要確認");
+        tail += c;
+      }
+      o += tail;
+      const yy = +o.slice(1, 4), mm = +o.slice(4, 6);
+      if (yy < 100 || yy > 140 || mm < 1 || mm > 12) fl.push("年月看起來不對");
+      const sc = fl.length, soft = /[6GSB5Z2D0Q8]/.test(tail) ? "末三碼含容易混淆的字（6/G、5/S、8/B、2/Z、0/D），請對照圖片確認" : "";
+      if (!best || sc < best.sc) best = { sc, code: o, flags: Array.from(new Set(fl)), soft };
+    }
+    return best;
+  }
+  function parseDate(s) {
+    const m = String(s).match(/(1[0-3]\d)\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
+    if (!m) return "";
+    const y = +m[1] + 1911, mo = +m[2], d = +m[3];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return "";
+    return y + "/" + String(mo).padStart(2, "0") + "/" + String(d).padStart(2, "0");
+  }
+  const normDate = (s) => { const m = String(s).trim().match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/); return m ? m[1] + "/" + m[2].padStart(2, "0") + "/" + m[3].padStart(2, "0") : ""; };
+  function parseDoc(s) { const m = String(s).replace(/\s/g, "").match(/115\d{7}/); return m ? m[0] : ""; }
+
+  /* ================= 圖像處理 ================= */
+  function cropC(c, x0, y0, x1, y1, scale) {
+    const w = c.width, h = c.height, sx = Math.floor(w * x0), sy = Math.floor(h * y0), sw = Math.max(1, Math.ceil(w * (x1 - x0))), sh = Math.max(1, Math.ceil(h * (y1 - y0)));
+    return cropPx(c, sx, sy, sw, sh, scale || 1);
+  }
+  function cropPx(c, x, y, w, h, scale) {
+    x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y)); w = Math.max(1, Math.min(c.width - x, Math.ceil(w))); h = Math.max(1, Math.min(c.height - y, Math.ceil(h)));
+    const o = document.createElement("canvas"); o.width = Math.max(1, Math.round(w * (scale || 1))); o.height = Math.max(1, Math.round(h * (scale || 1)));
+    const g = o.getContext("2d"); g.imageSmoothingQuality = "high"; g.fillStyle = "#fff"; g.fillRect(0, 0, o.width, o.height);
+    g.drawImage(c, x, y, w, h, 0, 0, o.width, o.height); return o;
+  }
+  function runs(arr, thr, gap) {
+    const out = []; let s = -1, last = -1;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] > thr) { if (s < 0) s = i; last = i; }
+      else if (s >= 0 && i - last > gap) { out.push([s, last]); s = -1; }
+    }
+    if (s >= 0) out.push([s, last]);
+    return out;
+  }
+  /* 右下角：找出條碼，其上方是收文日期、下方是文號 */
+  function analyzeBottom(c) {
+    const w = c.width, h = c.height, x0 = Math.floor(w * 0.70), x1 = Math.floor(w * 0.99), y0 = Math.floor(h * 0.80), rw = x1 - x0, rh = h - y0;
+    if (rw < 50 || rh < 50) return null;
+    const d = c.getContext("2d").getImageData(x0, y0, rw, rh).data, rows = new Int32Array(rh), colN = new Int32Array(rw), isDark = (i) => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 < 140;
+    for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) if (isDark((y * rw + x) * 4)) colN[x]++;
+    /* 掃描時邊緣的黑邊會讓整欄都是黑的，先排除 */
+    const skip = Array.from(colN, (n) => n > 0.55 * rh);
+    for (let y = 0; y < rh; y++) { let n = 0; for (let x = 0; x < rw; x++) if (!skip[x] && isDark((y * rw + x) * 4)) n++; rows[y] = n; }
+    const bars = runs(Array.from(rows, (v) => (v > 0.30 * rw ? 1 : 0)), 0, 3).filter((r) => r[1] - r[0] > h * 0.012);
+    if (!bars.length) return null;
+    const br = bars.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a));
+    const thr = Math.max(3, Math.floor(0.03 * rw));
+    const below = runs(Array.from(rows.slice(br[1] + 1)), thr, 4).map((r) => [r[0] + br[1] + 1, r[1] + br[1] + 1]).filter((r) => r[1] - r[0] >= 12);
+    const above = runs(Array.from(rows.slice(0, br[0])), thr, 4).filter((r) => r[1] - r[0] >= 14);
+    const res = {};
+    const unit = h / 3508;
+    if (below.length) { const r = below[0], top = Math.max(r[0], r[1] - Math.round(40 * unit)); res.num = [x0, y0 + top - 4, rw, r[1] - top + 10]; }
+    if (above.length) { const r = above[above.length - 1], top = Math.max(r[0], r[1] - Math.round(60 * unit)); res.date = [x0 + rw * 0.5, y0 + top - 5, rw * 0.5, r[1] - top + 10]; }
+    return res;
+  }
+  /* 便條紙（黃橙色）偵測 */
+  function findSticky(c) {
+    const sw = 400, sh = Math.round(c.height * sw / c.width), s = document.createElement("canvas"); s.width = sw; s.height = sh;
+    const g = s.getContext("2d"); g.drawImage(c, 0, 0, sw, sh);
+    const d = g.getImageData(0, 0, sw, sh).data, B = 8, bw = Math.floor(sw / B), bh = Math.floor(sh / B), cnt = new Int32Array(bw * bh);
+    for (let y = 0; y < bh * B; y++) for (let x = 0; x < bw * B; x++) {
+      const i = (y * sw + x) * 4, r = d[i], gg = d[i + 1], b = d[i + 2];
+      if (r > 215 && gg > 165 && gg < 235 && b < 175 && r - b > 60) cnt[Math.floor(y / B) * bw + Math.floor(x / B)]++;
+    }
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, n = 0;
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) if (cnt[by * bw + bx] > B * B * 0.5) { n++; x0 = Math.min(x0, bx); y0 = Math.min(y0, by); x1 = Math.max(x1, bx); y1 = Math.max(y1, by); }
+    if (n < 12) return null;
+    const k = c.width / sw;
+    return [x0 * B * k, y0 * B * k, (x1 - x0 + 1) * B * k, (y1 - y0 + 1) * B * k];
+  }
+  const url = (c, q) => c.toDataURL("image/jpeg", q || 0.85);
+
+  /* ================= 名單 ================= */
+  let roster = [];
+  function setRoster(list, from) {
+    roster = Array.from(new Set(list.map((s) => String(s).trim()).filter(Boolean)));
+    lsSet(KEY_R, JSON.stringify(roster));
+    $("#rosterInfo").textContent = roster.length ? "已載入 " + roster.length + " 人" + (from ? "（" + from + "）" : "") : "尚未載入名單";
+    $("#rosterTxt").value = roster.join("\n");
+    refreshWho();
+  }
+  function loadScript(src) { return new Promise((ok, no) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = () => no(new Error("載入失敗：" + src)); document.head.appendChild(s); }); }
+  async function readRosterFile(f) {
+    try {
+      if (!window.XLSX) await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+      let best = [];
+      for (const sn of wb.SheetNames) {
+        const ws = wb.Sheets[sn]; if (!ws["!ref"]) continue;
+        const rg = XLSX.utils.decode_range(ws["!ref"]);
+        for (let r = rg.s.r; r <= rg.e.r; r++) for (let c = rg.s.c; c <= rg.e.c; c++) {
+          const cell = ws[XLSX.utils.encode_cell({ r, c })];
+          if (!cell || String(cell.v).trim() !== "承辦人") continue;
+          const names = []; let blank = 0;
+          for (let rr = r + 1; rr <= Math.min(rg.e.r, r + 80); rr++) {
+            const x = ws[XLSX.utils.encode_cell({ r: rr, c })], v = x && x.v != null ? String(x.v).trim() : "";
+            if (!v) { if (++blank >= 2) break; continue; }
+            blank = 0;
+            if (/^[㐀-鿿]{2,4}$/.test(v) && !["總數", "小隊", "承辦人"].includes(v)) names.push(v);
+          }
+          if (names.length > best.length || (names.length === best.length && /未結/.test(sn))) best = names;
+        }
+      }
+      if (best.length < 3) throw new Error("找不到「承辦人」欄的名單");
+      setRoster(best, f.name); hide();
+    } catch (e) {
+      $("#rosterDet").open = true;
+      show("讀不到名單（" + (e && e.message ? e.message : e) + "）。如果檔案有加密，請在下方貼上名單。", "warn");
+    }
+  }
+  $("#rosterFile").addEventListener("click", () => $("#rosterIn").click());
+  $("#rosterIn").addEventListener("change", function () { const f = this.files[0]; this.value = ""; if (f) readRosterFile(f); });
+  $("#rosterSave").addEventListener("click", () => { const l = $("#rosterTxt").value.split(/[\n,，、\s]+/); setRoster(l, "手動貼上"); hide(); });
+  try { const r = JSON.parse(lsGet(KEY_R) || "[]"); if (r.length) setRoster(r, "上次使用"); else $("#rosterInfo").textContent = "尚未載入名單"; } catch (e) { $("#rosterInfo").textContent = "尚未載入名單"; }
+
+  /* ================= 頁面資料 ================= */
+  let docs = [], pages = [], cur = -1, ocrStop = false, ocrRunning = false, worker = null;
+  const mkRec = (fi, n, name) => ({
+    fi, n, src: name + " 第 " + n + " 頁", status: "wait", err: "", img: "", strip: "", stickyImg: "", numImg: "", dateImg: "", codeImg: "",
+    type: "occ", code: "", codeFlags: [], codeSoft: "", who: "", sticky: false, caseNo: "", realWho: "", cat: "", docNo: "", docFlag: "", date: "", dateFlag: "",
+    skip: false, touched: {}
+  });
+  const cands = (q) => { q = String(q).trim(); if (!q) return []; return roster.filter((n) => Array.from(q).every((ch) => n.includes(ch))); };
+
+  /* ---------- 辨識 ---------- */
+  async function ensureOcr() {
+    if (worker) return worker;
+    if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+    $("#progTxt").textContent = "正在下載辨識引擎與英數字資料（第一次使用需要一點時間）…";
+    worker = await Tesseract.createWorker("eng", 1, { logger: (m) => { if (m.status && /loading|initializ/.test(m.status)) $("#progTxt").textContent = "準備辨識引擎… " + Math.round((m.progress || 0) * 100) + "%"; } });
+    return worker;
+  }
+  async function recog(canvas, wl, psm, blocks) {
+    await worker.setParameters({ tessedit_char_whitelist: wl, tessedit_pageseg_mode: String(psm) });
+    const r = await worker.recognize(canvas, {}, blocks ? { text: true, blocks: true } : { text: true });
+    return r.data;
+  }
+  function linesOf(d) {
+    if (d.lines && d.lines.length) return d.lines;
+    const out = [];
+    (d.blocks || []).forEach((b) => (b.paragraphs || []).forEach((p) => (p.lines || []).forEach((l) => out.push(l))));
+    return out;
+  }
+  const ALNUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  async function ocrCode(full) {
+    const top = cropC(full, 0.30, 0, 1, 0.24, 1);
+    const d1 = await recog(top, ALNUM, 11, true);
+    let box = null;
+    for (const l of linesOf(d1)) {
+      const s = String(l.text || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+      if (s.length >= 10 && /Z[1IL]{2}5|AD[1IL]|[1I]{2}[59]/.test(s) && l.bbox) { box = l.bbox; break; }
+    }
+    let best = fixCode(d1.text || "");
+    let crop = null;
+    if (box) {
+      const p = 14, w = box.x1 - box.x0 + 2 * p + 70, h = box.y1 - box.y0 + 2 * p;
+      crop = cropPx(top, box.x0 - p, box.y0 - p, w, h, 2);
+      const d2 = await recog(crop, ALNUM, 7, false), r2 = fixCode(d2.text || "");
+      if (r2 && (!best || r2.sc <= best.sc)) best = r2;
+    }
+    return { best, img: crop ? url(crop, 0.9) : "" };
+  }
+  async function processPage(rec) {
+    rec.status = "busy"; refreshStatus();
+    const doc = docs[rec.fi], pg = await doc.getPage(rec.n), v0 = pg.getViewport({ scale: 1 });
+    const sc = Math.min(3.5, 2480 / v0.width), vp = pg.getViewport({ scale: sc }), full = document.createElement("canvas");
+    full.width = Math.floor(vp.width); full.height = Math.floor(vp.height);
+    const g = full.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, full.width, full.height);
+    await pg.render({ canvasContext: g, viewport: vp }).promise;
+    pg.cleanup();
+    const view = cropC(full, 0, 0, 1, 1, Math.min(1, 1200 / full.width));
+    rec.img = url(view, 0.82);
+    rec.strip = url(cropC(full, 0.84, 0, 1, 1, Math.min(1, 1000 / full.height)), 0.85);
+    const st = findSticky(full);
+    if (st) { rec.sticky = true; rec.stickyImg = url(cropPx(full, st[0] - 10, st[1] - 10, st[2] + 20, st[3] + 20, Math.min(1.5, 700 / (st[2] + 20))), 0.9); rec.type = "cap"; }
+    const bt = analyzeBottom(full);
+    if (bt && bt.num) rec.numImg = url(cropPx(full, bt.num[0], bt.num[1], bt.num[2], bt.num[3], 1), 0.9);
+    if (bt && bt.date) rec.dateImg = url(cropPx(full, bt.date[0], bt.date[1], bt.date[2], bt.date[3], 1), 0.9);
+    if (worker) {
+      try {
+        const r = await ocrCode(full);
+        if (!rec.touched.code) {
+          rec.codeImg = r.img;
+          if (r.best) { rec.code = r.best.code; rec.codeFlags = r.best.flags; rec.codeSoft = r.best.soft || ""; } else rec.codeFlags = ["沒有讀到案號，請對照圖片輸入"];
+        }
+        if (bt && bt.date && !rec.touched.date) {
+          const c = cropPx(full, bt.date[0], bt.date[1], bt.date[2], bt.date[3], 3), d = await recog(c, "0123456789/", 7, false), dt = parseDate(d.text || "");
+          if (dt) { rec.date = dt; rec.dateFlag = ""; }
+        }
+        if (bt && bt.num && !rec.touched.docNo) {
+          const c = cropPx(full, bt.num[0], bt.num[1], bt.num[2], bt.num[3], 3), d = await recog(c, "0123456789", 7, false), dn = parseDoc(d.text || "");
+          if (dn) { rec.docNo = dn; rec.docFlag = "自動辨識，請核對"; }
+        }
+      } catch (e) { rec.err = "辨識失敗：" + (e && e.message ? e.message : e); }
+    }
+    if (!rec.touched.date && !rec.date) {
+      const def = normDate($("#defDate").value), dd = def || prevDate(rec);
+      if (dd) { rec.date = dd; rec.dateFlag = def ? "" : "沿用前一頁的日期，請核對"; } else rec.dateFlag = "沒讀到日期，請輸入";
+    }
+    rec.status = "ok";
+    full.width = full.height = 1;
+  }
+  function prevDate(rec) { const i = pages.indexOf(rec); for (let k = i - 1; k >= 0; k--) if (pages[k].date) return pages[k].date; return ""; }
+
+  async function runAll() {
+    if (ocrRunning) return;
+    ocrRunning = true; ocrStop = false; $("#stopOcr").hidden = false; $("#progBar").hidden = false;
+    let ocrOk = true;
+    try { await ensureOcr(); } catch (e) { ocrOk = false; worker = null; show("無法載入辨識引擎（" + (e && e.message ? e.message : e) + "）。仍可手動輸入每一頁，圖片、便條紙偵測和匯出都能用。", "warn"); }
+    const total = pages.length; let done = 0;
+    for (let i = 0; i < pages.length; i++) {
+      if (ocrStop) break;
+      const rec = pages[i]; if (rec.status === "ok") { done++; continue; }
+      $("#progTxt").textContent = (ocrOk ? "辨識中 " : "處理中 ") + (i + 1) + " / " + total + " 頁…（辨識進行時你可以先開始核對已完成的頁面）";
+      try { await processPage(rec); } catch (e) { rec.status = "err"; rec.err = "這一頁讀取失敗：" + (e && e.message ? e.message : e); }
+      done++; $("#prog").style.width = Math.round(done / total * 100) + "%";
+      refreshStatus(); if (i === cur) renderForm(); else renderTable();
+      if (cur < 0 && rec.status === "ok") go(i);
+      await tick();
+    }
+    $("#progTxt").textContent = ocrStop ? "已停止（已處理 " + done + " / " + total + " 頁）" : "辨識完成，共 " + total + " 頁。請逐頁核對標黃的欄位。";
+    ocrRunning = false; $("#stopOcr").hidden = true;
+    if (worker) { try { await worker.terminate(); } catch (e) {} worker = null; }
+    renderTable();
+  }
+  $("#stopOcr").addEventListener("click", () => { ocrStop = true; });
+
+  /* ---------- 加入檔案 ---------- */
+  async function addPdfs(list) {
+    const fs = Array.from(list).filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+    if (!fs.length) { show("沒有找到 PDF 檔案。", "err"); return; }
+    hide();
+    for (const f of fs) {
+      try {
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await f.arrayBuffer()), isEvalSupported: false }).promise;
+        docs.push(doc); const fi = docs.length - 1;
+        for (let n = 1; n <= doc.numPages; n++) pages.push(mkRec(fi, n, f.name));
+      } catch (e) { show("「" + f.name + "」無法開啟，可能已加密或損毀。", "err"); }
+    }
+    $("#fileInfo").textContent = "已加入 " + pages.length + " 頁";
+    $("#work").hidden = false; $("#tblBox").hidden = false;
+    renderTable(); runAll();
+  }
+  const drop = $("#drop");
+  drop.addEventListener("click", () => $("#pdfIn").click());
+  drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#pdfIn").click(); } });
+  $("#pdfIn").addEventListener("change", function () { const l = Array.from(this.files); this.value = ""; addPdfs(l); });
+  ["dragenter", "dragover"].forEach((n) => drop.addEventListener(n, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((n) => drop.addEventListener(n, () => drop.classList.remove("over")));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); addPdfs(e.dataTransfer.files); });
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => { if (!drop.contains(e.target)) e.preventDefault(); });
+  $("#defDate").value = lsGet(KEY_D) || "";
+  $("#defDate").addEventListener("input", () => lsSet(KEY_D, $("#defDate").value));
+  $("#applyDate").addEventListener("click", () => {
+    const d = normDate($("#defDate").value); if (!d) { show("預設收文日期格式要像 2026/11/17。", "warn"); return; }
+    hide(); pages.forEach((p) => { p.date = d; p.dateFlag = ""; p.touched.date = true; }); renderForm(); renderTable();
+  });
+
+  /* ================= 表單 ================= */
+  const F = { code: $("#code"), who: $("#who"), date: $("#date"), caseNo: $("#caseNo"), realWho: $("#realWho"), cat: $("#cat"), docNo: $("#docNo") };
+  function setImg(el, src) { if (src) { el.src = src; el.hidden = false; } else { el.removeAttribute("src"); el.hidden = true; } }
+  function refreshStatus() {
+    const r = pages[cur]; if (!r) return;
+    $("#pgSt").textContent = r.status === "wait" ? "等待辨識…" : r.status === "busy" ? "辨識中…" : r.status === "err" ? r.err : (r.err || "");
+  }
+  function refreshWho() {
+    const r = pages[cur]; if (!r) return;
+    chips($("#whoChips"), F.who.value, "who"); chips($("#realChips"), F.realWho.value, "realWho");
+    const ok = !r.who || roster.includes(r.who);
+    $("#fWho").classList.toggle("bad", !!r.who && !ok); $("#fWho").classList.toggle("uncertain", false);
+    $("#whoNote").textContent = !roster.length ? "還沒載入名單，只能手動輸入全名。" : r.who ? (ok ? "" : "這個名字不在名單裡。") : "";
+  }
+  function chips(box, q, key) {
+    const r = pages[cur]; box.innerHTML = "";
+    const c = cands(q); if (!c.length || roster.includes(String(q).trim())) return;
+    c.slice(0, 8).forEach((n) => { const b = document.createElement("button"); b.type = "button"; b.textContent = n; b.addEventListener("click", () => { r[key] = n; r.touched[key] = true; F[key].value = n; refreshWho(); renderTable(); F[key].focus(); }); box.appendChild(b); });
+  }
+  function renderForm() {
+    const r = pages[cur]; if (!r) return;
+    $("#pageImg").src = r.img || ""; $("#pgNo").textContent = (cur + 1) + " / " + pages.length + "　" + r.src;
+    document.querySelectorAll("input[name=type]").forEach((x) => (x.checked = x.value === r.type));
+    $("#codeLb").textContent = r.type === "cap" ? "發生案號（案件編號）" : "E化案號";
+    F.code.value = r.code; setImg($("#codeImg"), r.codeImg);
+    const stn = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = stn ? stn + "派出所" : "";
+    const fl = r.codeFlags || []; $("#fCode").classList.toggle("uncertain", fl.length > 0 || (r.status === "ok" && !r.code));
+    $("#codeNote").textContent = fl.length ? "請對照上方圖片核對：" + fl.join("、") : r.code ? (r.codeSoft || "已依案號規則校正。") : "";
+    F.who.value = r.who; setImg($("#stripImg"), r.strip);
+    F.date.value = r.date; setImg($("#dateImg"), r.dateImg);
+    $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || "";
+    $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
+    F.caseNo.value = r.caseNo; F.realWho.value = r.realWho;
+    $("#realHint").textContent = r.sticky ? "" : "沒有便條紙：實際承辦人會填成上面的承辦人，發生文號留空。";
+    $("#capBox").hidden = r.type !== "cap"; F.cat.value = r.cat; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
+    $("#fDoc").classList.toggle("uncertain", !!r.docFlag); $("#docNote").textContent = r.docFlag || "";
+    $("#skip").checked = r.skip;
+    $("#prev").disabled = cur <= 0; $("#next").disabled = cur >= pages.length - 1;
+    refreshStatus(); refreshWho(); renderTable();
+  }
+  function go(i) { if (i < 0 || i >= pages.length) return; cur = i; $("#viewer").classList.remove("zoom"); renderForm(); $("#viewer").scrollTop = 0; }
+  $("#prev").addEventListener("click", () => go(cur - 1));
+  $("#next").addEventListener("click", () => go(cur + 1));
+  document.addEventListener("keydown", (e) => { if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); go(cur + 1); } else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); go(cur - 1); } });
+  $("#viewer").addEventListener("click", () => $("#viewer").classList.toggle("zoom"));
+
+  function bind(key, after) {
+    F[key].addEventListener("input", () => { const r = pages[cur]; if (!r) return; r[key] = F[key].value; r.touched[key] = true; if (after) after(r); refreshWho(); renderTable(); });
+  }
+  bind("code", (r) => { r.code = F.code.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); r.codeFlags = []; r.codeSoft = ""; $("#fCode").classList.remove("uncertain"); $("#codeNote").textContent = ""; const s = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = s ? s + "派出所" : ""; });
+  bind("who"); bind("realWho");
+  bind("date", (r) => { r.dateFlag = ""; $("#fDate").classList.remove("uncertain"); $("#dateNote").textContent = ""; });
+  bind("caseNo", (r) => { r.caseNo = F.caseNo.value.replace(/\D/g, ""); });
+  bind("cat"); bind("docNo", (r) => { r.docNo = F.docNo.value.replace(/\D/g, ""); r.docFlag = ""; $("#fDoc").classList.remove("uncertain"); $("#docNote").textContent = ""; });
+  F.date.addEventListener("blur", () => { const r = pages[cur]; if (!r) return; const d = normDate(F.date.value); if (d) { r.date = d; F.date.value = d; renderTable(); } });
+  document.querySelectorAll("input[name=type]").forEach((x) => x.addEventListener("change", () => { const r = pages[cur]; if (!r) return; r.type = x.value; r.touched.type = true; renderForm(); }));
+  $("#sticky").addEventListener("change", () => { const r = pages[cur]; r.sticky = $("#sticky").checked; r.touched.sticky = true; renderForm(); });
+  $("#skip").addEventListener("change", () => { pages[cur].skip = $("#skip").checked; renderTable(); });
+  function whoEnter(key, next) {
+    F[key].addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return; e.preventDefault(); const r = pages[cur], c = cands(F[key].value);
+      if (roster.includes(r[key])) { if (next) go(cur + 1); return; }
+      if (c.length === 1) { r[key] = c[0]; r.touched[key] = true; F[key].value = c[0]; refreshWho(); renderTable(); }
+      else if (!c.length && F[key].value.trim()) { $("#whoNote").textContent = key === "who" ? "名單裡找不到含有這個字的人。" : ""; }
+    });
+  }
+  whoEnter("who", true); whoEnter("realWho", false);
+
+  /* ================= 表格與匯出 ================= */
+  function derive(r) {
+    const cap = r.type === "cap", real = r.sticky && r.realWho ? r.realWho : r.who;
+    return [r.who, cap ? "" : r.code, cap ? r.code : "", r.sticky ? r.caseNo : "", real, cap ? r.cat : "", cap ? r.docNo : "", r.date];
+  }
+  function renderTable() {
+    const tb = $("#tbl tbody"); if (!tb) return;
+    let miss = 0;
+    tb.innerHTML = pages.map((r, i) => {
+      const v = derive(r), cap = r.type === "cap";
+      const need = [!v[0], !(cap ? v[2] : v[1]), false, false, !v[4], cap && !v[5], cap && !v[6], !v[7]];
+      const mm = r.skip ? 0 : need.filter(Boolean).length; miss += mm;
+      const td = (j, t) => '<td class="' + (!r.skip && need[j] ? "miss" : "") + '">' + (esc(t || "") || (!r.skip && need[j] ? "缺" : "")) + "</td>";
+      const unc = (r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag;
+      return '<tr data-i="' + i + '" class="' + (i === cur ? "cur " : "") + (r.skip ? "skip" : "") + '"><td>' + (i + 1) + "</td><td>" + esc(r.src) + (r.status === "ok" ? "" : r.status === "busy" ? "（辨識中）" : r.status === "err" ? "（失敗）" : "（等待）") + (unc ? " ⚠" : "") + "</td><td>" + (cap ? "破獲" : "發生") + "</td>" +
+        td(0, v[0]) + td(1, v[1]) + td(2, v[2]) + td(3, v[3]) + td(4, v[4]) + td(5, v[5]) + td(6, v[6]) + td(7, v[7]) + "</tr>";
+    }).join("");
+    const unc = pages.filter((r) => !r.skip && ((r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag)).length;
+    $("#tblHint").textContent = pages.length ? (miss ? "還有 " + miss + " 個必填欄位是空的（紅字「缺」）。" : "必填欄位都已填寫。") + (unc ? " ⚠ 表示有 " + unc + " 頁的案號、日期或文號是自動猜的，建議逐頁核對。" : "") : "";
+    const rr = tb.querySelector("tr.cur"); if (rr) rr.scrollIntoView({ block: "nearest" });
+  }
+  $("#tbl tbody").addEventListener("click", (e) => { const tr = e.target.closest("tr"); if (tr) go(+tr.dataset.i); });
+  const HEAD = ["承辦人", "E化案號", "發生案號", "發生文號", "實際承辦人", "案類", "文號", "收文日期"];
+  const rowsOut = () => pages.filter((r) => !r.skip).map(derive);
+  function remember() {
+    try { const set = new Set(JSON.parse(lsGet(KEY_C) || "[]")); pages.forEach((r) => { if (r.type === "cap" && r.cat) set.add(r.cat); }); lsSet(KEY_C, JSON.stringify(Array.from(set).slice(-60))); fillCats(); } catch (e) {}
+  }
+  function fillCats() { try { $("#catList").innerHTML = JSON.parse(lsGet(KEY_C) || "[]").map((c) => '<option value="' + esc(c) + '">').join(""); } catch (e) {} }
+  fillCats();
+  function incomplete() { const n = pages.filter((r) => r.status !== "ok" && !r.skip).length; return n ? "還有 " + n + " 頁沒有辨識完成。" : ""; }
+  $("#copyBtn").addEventListener("click", async () => {
+    remember();
+    const tsv = rowsOut().map((r) => r.map((c) => String(c).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+    try { await navigator.clipboard.writeText(tsv); }
+    catch (e) { const t = document.createElement("textarea"); t.value = tsv; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch (x) {} t.remove(); }
+    show("已複製 " + rowsOut().length + " 列（不含標題）。到 Excel 登記表的第一個空白列的 A 欄貼上。" + incomplete(), incomplete() ? "warn" : "");
+  });
+  function csvEsc(s) { s = String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  function dl(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement("a"); a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 20000); }
+  $("#csvBtn").addEventListener("click", () => {
+    remember();
+    const t = [HEAD].concat(rowsOut()).map((r) => r.map(csvEsc).join(",")).join("\r\n");
+    dl(new Blob(["﻿" + t], { type: "text/csv;charset=utf-8" }), "陳報單登記.csv");
+  });
+  $("#xlsxBtn").addEventListener("click", async () => {
+    remember();
+    try {
+      if (!window.XLSX) await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+      const aoa = [HEAD].concat(rowsOut().map((r) => r.map((c, j) => {
+        if (j === 7 && /^\d{4}\/\d\d\/\d\d$/.test(c)) { const p = c.split("/"); return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])); }
+        if ((j === 3 || j === 6) && /^\d+$/.test(c)) return +c;
+        return c;
+      })));
+      const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true });
+      for (let i = 1; i < aoa.length; i++) { const c = ws[XLSX.utils.encode_cell({ r: i, c: 7 })]; if (c && c.t === "d") c.z = "yyyy/mm/dd"; }
+      ws["!cols"] = [10, 18, 18, 12, 12, 12, 12, 12].map((w) => ({ wch: w }));
+      const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "登記"); XLSX.writeFile(wb, "陳報單登記.xlsx");
+    } catch (e) { show("無法產生 Excel（" + (e && e.message ? e.message : e) + "），請改用「複製」或「下載 CSV」。", "warn"); }
+  });
+})();
+</script>
+<script>
+(function () {
+  function cur() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
+  function sync() { var t = cur(); document.querySelectorAll("a[data-nav]").forEach(function (a) { a.href = a.getAttribute("data-nav") + "?theme=" + t; }); }
+  var b = document.getElementById("themeBtn");
+  if (b) b.addEventListener("click", function () {
+    var n = cur() === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = n;
+    try { localStorage.setItem("pdf-tools-theme", n); } catch (e) {}
+    sync();
+  });
+  sync();
+})();
+</script>
+</body>
+</html>
