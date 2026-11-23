@@ -171,6 +171,7 @@
       <div class="radios">
         <label><input type="radio" name="type" value="occ">發生卷（陳報單）</label>
         <label><input type="radio" name="type" value="cap">破獲卷（呈報單，有嫌疑人）</label>
+        <label><input type="radio" name="type" value="xfer">移轉（承辦人欄填轉往的分局）</label>
       </div>
 
       <div class="field" id="fCode">
@@ -184,7 +185,7 @@
         <div class="lb"><span>承辦人（右邊緣手寫的字）</span></div>
         <img class="strip" id="stripImg" alt="" hidden>
         <input id="who" type="text" spellcheck="false" autocomplete="off" placeholder="輸入名字裡的一個字，按 Enter 選取；再按 Enter 到下一頁">
-        <div class="chips" id="whoChips"></div>
+        <div class="chips" id="whoChips"></div><datalist id="destList"><option value="中和"><option value="板橋"><option value="新莊"><option value="三峽"><option value="樹林"><option value="永和"></datalist>
         <div class="note" id="whoNote"></div>
       </div>
 
@@ -637,9 +638,10 @@
   function refreshWho() {
     const r = pages[cur]; if (!r) return;
     chips($("#whoChips"), F.who.value, "who"); chips($("#realChips"), F.realWho.value, "realWho");
-    const ok = !r.who || roster.includes(r.who);
+    F.who.setAttribute("list", r.type === "xfer" ? "destList" : "");
+    const ok = !r.who || roster.includes(r.who) || r.type === "xfer";
     $("#fWho").classList.toggle("bad", !!r.who && !ok); $("#fWho").classList.toggle("uncertain", false);
-    $("#whoNote").textContent = !roster.length ? "還沒載入名單，只能手動輸入全名。" : r.who ? (ok ? "" : "這個名字不在名單裡。") : "";
+    $("#whoNote").textContent = r.type === "xfer" ? "移轉：這欄直接填轉往的分局名稱（例如 中和），不用對名單。" : !roster.length ? "還沒載入名單，只能手動輸入全名。" : r.who ? (ok ? "" : "這個名字不在名單裡。") : "";
   }
   function chips(box, q, key) {
     const r = pages[cur]; box.innerHTML = "";
@@ -661,7 +663,7 @@
     $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
     F.caseNo.value = r.caseNo; F.realWho.value = r.realWho;
     $("#realHint").textContent = r.sticky ? "" : "沒有便條紙：實際承辦人會填成上面的承辦人，發生文號留空。";
-    $("#capBox").hidden = r.type !== "cap"; F.cat.value = r.cat; $("#fCat").classList.toggle("uncertain", !!r.catFlag); $("#catNote").textContent = r.catFlag || ""; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
+    $("#capBox").hidden = r.type !== "cap" && r.type !== "xfer"; F.cat.value = r.cat; $("#fCat").classList.toggle("uncertain", !!r.catFlag); $("#catNote").textContent = r.catFlag || ""; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
     $("#fDoc").classList.toggle("uncertain", !!r.docFlag); $("#docNote").textContent = r.docFlag || "";
     $("#skip").checked = r.skip;
     $("#prev").disabled = cur <= 0; $("#next").disabled = cur >= pages.length - 1;
@@ -685,12 +687,13 @@
   $("#catOcr").addEventListener("click", () => { const r = pages[cur]; if (r) { r.touched.cat = false; runCat(r); } });
   bind("docNo", (r) => { r.docNo = F.docNo.value.replace(/\D/g, ""); r.docFlag = ""; $("#fDoc").classList.remove("uncertain"); $("#docNote").textContent = ""; });
   F.date.addEventListener("blur", () => { const r = pages[cur]; if (!r) return; const d = normDate(F.date.value); if (d) { r.date = d; F.date.value = d; renderTable(); } });
-  document.querySelectorAll("input[name=type]").forEach((x) => x.addEventListener("change", () => { const r = pages[cur]; if (!r) return; r.type = x.value; r.touched.type = true; renderForm(); if (r.type === "cap" && !r.cat && !r.touched.cat && r.status === "ok") runCat(r); }));
+  document.querySelectorAll("input[name=type]").forEach((x) => x.addEventListener("change", () => { const r = pages[cur]; if (!r) return; r.type = x.value; r.touched.type = true; if (r.type === "xfer") { if (roster.includes(r.who)) r.who = ""; } else if (!roster.includes(r.who)) r.who = ""; F.who.setAttribute("list", r.type === "xfer" ? "destList" : ""); renderForm(); if ((r.type === "cap" || r.type === "xfer") && !r.cat && !r.touched.cat && r.status === "ok") runCat(r); }));
   $("#sticky").addEventListener("change", () => { const r = pages[cur]; r.sticky = $("#sticky").checked; r.touched.sticky = true; renderForm(); });
   $("#skip").addEventListener("change", () => { pages[cur].skip = $("#skip").checked; renderTable(); });
   function whoEnter(key, next) {
     F[key].addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return; e.preventDefault(); const r = pages[cur], c = cands(F[key].value);
+      if (key === "who" && r.type === "xfer") { if (r.who.trim()) go(cur + 1); return; }
       if (roster.includes(r[key])) { if (next) go(cur + 1); return; }
       if (c.length === 1) { r[key] = c[0]; r.touched[key] = true; F[key].value = c[0]; refreshWho(); renderTable(); }
       else if (!c.length && F[key].value.trim()) { $("#whoNote").textContent = key === "who" ? "名單裡找不到含有這個字的人。" : ""; }
@@ -700,19 +703,19 @@
 
   /* ================= 表格與匯出 ================= */
   function derive(r) {
-    const cap = r.type === "cap", real = r.sticky && r.realWho ? r.realWho : r.who;
+    const cap = r.type === "cap" || r.type === "xfer", real = r.sticky && r.realWho ? r.realWho : r.who;
     return [r.who, r.code, "", r.sticky ? r.caseNo : "", real, cap ? r.cat : "", cap ? r.docNo : "", r.date];
   }
   function renderTable() {
     const tb = $("#tbl tbody"); if (!tb) return;
     let miss = 0;
     tb.innerHTML = pages.map((r, i) => {
-      const v = derive(r), cap = r.type === "cap";
+      const v = derive(r), cap = r.type === "cap" || r.type === "xfer";
       const need = [!v[0], !v[1], false, false, !v[4], cap && !v[5], cap && !v[6], !v[7]];
       const mm = r.skip ? 0 : need.filter(Boolean).length; miss += mm;
       const td = (j, t) => '<td class="' + (!r.skip && need[j] ? "miss" : "") + '">' + (esc(t || "") || (!r.skip && need[j] ? "缺" : "")) + "</td>";
       const unc = (r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag || r.catFlag;
-      return '<tr data-i="' + i + '" class="' + (i === cur ? "cur " : "") + (r.skip ? "skip" : "") + '"><td>' + (i + 1) + "</td><td>" + esc(r.src) + (r.status === "ok" ? "" : r.status === "busy" ? "（辨識中）" : r.status === "err" ? "（失敗）" : "（等待）") + (unc ? " ⚠" : "") + "</td><td>" + (cap ? "破獲" : "發生") + "</td>" +
+      return '<tr data-i="' + i + '" class="' + (i === cur ? "cur " : "") + (r.skip ? "skip" : "") + '"><td>' + (i + 1) + "</td><td>" + esc(r.src) + (r.status === "ok" ? "" : r.status === "busy" ? "（辨識中）" : r.status === "err" ? "（失敗）" : "（等待）") + (unc ? " ⚠" : "") + "</td><td>" + (r.type === "xfer" ? "移轉" : cap ? "破獲" : "發生") + "</td>" +
         td(0, v[0]) + td(1, v[1]) + td(2, v[2]) + td(3, v[3]) + td(4, v[4]) + td(5, v[5]) + td(6, v[6]) + td(7, v[7]) + "</tr>";
     }).join("");
     const unc = pages.filter((r) => !r.skip && ((r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag)).length;
@@ -723,7 +726,7 @@
   const HEAD = ["承辦人", "E化案號", "發生案號", "發生文號", "實際承辦人", "案類", "文號", "收文日期"];
   const rowsOut = () => pages.filter((r) => !r.skip).map(derive);
   function remember() {
-    try { const set = new Set(JSON.parse(lsGet(KEY_C) || "[]")); pages.forEach((r) => { if (r.type === "cap" && r.cat) set.add(r.cat); }); lsSet(KEY_C, JSON.stringify(Array.from(set).slice(-60))); fillCats(); } catch (e) {}
+    try { const set = new Set(JSON.parse(lsGet(KEY_C) || "[]")); pages.forEach((r) => { if ((r.type === "cap" || r.type === "xfer") && r.cat) set.add(r.cat); }); lsSet(KEY_C, JSON.stringify(Array.from(set).slice(-60))); fillCats(); } catch (e) {}
   }
   function fillCats() { try { $("#catList").innerHTML = JSON.parse(lsGet(KEY_C) || "[]").map((c) => '<option value="' + esc(c) + '">').join(""); } catch (e) {} }
   fillCats();
