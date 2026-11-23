@@ -211,8 +211,9 @@
       </div>
 
       <div class="grp" id="capBox" hidden>
-        <div class="field"><div class="lb"><span>案類（觸犯法條）</span></div>
-          <input id="cat" type="text" spellcheck="false" autocomplete="off" list="catList"><datalist id="catList"></datalist></div>
+        <div class="field" id="fCat"><div class="lb"><span>案類（單子上的「觸犯法條」）</span><button id="catOcr" type="button" style="padding:2px 10px">自動讀取案類</button></div>
+          <input id="cat" type="text" spellcheck="false" autocomplete="off" list="catList"><datalist id="catList"></datalist>
+          <div class="note" id="catNote"></div></div>
         <div class="field" id="fDoc">
           <div class="lb"><span>文號（收文條碼下方的數字）</span></div>
           <img class="crop" id="docImg" alt="" hidden>
@@ -297,14 +298,33 @@
     }
     return best;
   }
+  /* 收文日期只可能是今年或去年（民國），讀成別的年份一律當作讀錯 */
   function parseDate(s) {
     const m = String(s).match(/(1[0-3]\d)\D{0,3}(\d{1,2})\D{0,3}(\d{1,2})/);
     if (!m) return "";
+    const cy = new Date().getFullYear() - 1911;
+    if (+m[1] < cy - 1 || +m[1] > cy) return "";
     const y = +m[1] + 1911, mo = +m[2], d = +m[3];
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return "";
     return y + "/" + String(mo).padStart(2, "0") + "/" + String(d).padStart(2, "0");
   }
   const normDate = (s) => { const m = String(s).trim().match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/); return m ? m[1] + "/" + m[2].padStart(2, "0") + "/" + m[3].padStart(2, "0") : ""; };
+  /* 檔名裡的日期，例如「1151118公文.pdf」→ 2026/11/18 */
+  function fileDate(name) {
+    const m = String(name).match(/(1[0-3]\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
+    return m ? (+m[1] + 1911) + "/" + m[2] + "/" + m[3] : "";
+  }
+  /* 從「觸犯法條」那一列讀出案類；讀不到就找內文的「依○○罪」 */
+  function parseCat(text) {
+    const clean = (v) => String(v).replace(/[^\u4e00-\u9fff、，,]/g, "").replace(/[，,]/g, "、").replace(/^、+|、+$/g, "");
+    const lines = String(text).split(/\n/).map((l) => l.replace(/\s+/g, ""));
+    for (const l of lines) {
+      const m = l.match(/觸犯?法條[|｜:：]*(.*)$/) || l.match(/犯法條[|｜:：]*(.*)$/);
+      if (m) { const v = clean(m[1]); if (v.length >= 2) return v; }
+    }
+    const m2 = lines.join("").match(/依([\u4e00-\u9fff、]{2,24}?)罪/);
+    return m2 ? clean(m2[1]) : "";
+  }
   function parseDoc(s) { const m = String(s).replace(/\s/g, "").match(/115\d{7}/); return m ? m[0] : ""; }
 
   /* ================= 圖像處理 ================= */
@@ -413,6 +433,7 @@
   let docs = [], pages = [], cur = -1, ocrStop = false, ocrRunning = false, worker = null;
   const mkRec = (fi, n, name) => ({
     fi, n, src: name + " 第 " + n + " 頁", status: "wait", err: "", img: "", strip: "", stickyImg: "", numImg: "", dateImg: "", codeImg: "",
+    nameDate: fileDate(name), ocrDate: "", catFlag: "", occNo: "",
     type: "occ", code: "", codeFlags: [], codeSoft: "", who: "", sticky: false, caseNo: "", realWho: "", cat: "", docNo: "", docFlag: "", date: "", dateFlag: "",
     skip: false, touched: {}
   });
@@ -464,14 +485,43 @@
     }
     return { best, img: crop ? url(crop, 0.9) : "" };
   }
-  async function processPage(rec) {
-    rec.status = "busy"; refreshStatus();
+  async function renderFull(rec) {
     const doc = docs[rec.fi], pg = await doc.getPage(rec.n), v0 = pg.getViewport({ scale: 1 });
     const sc = Math.min(3.5, 2480 / v0.width), vp = pg.getViewport({ scale: sc }), full = document.createElement("canvas");
     full.width = Math.floor(vp.width); full.height = Math.floor(vp.height);
     const g = full.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, full.width, full.height);
     await pg.render({ canvasContext: g, viewport: vp }).promise;
     pg.cleanup();
+    return full;
+  }
+  /* 中文辨識只在讀「案類」時才下載、使用 */
+  let chiWorker = null;
+  async function ensureChi() {
+    if (chiWorker) return chiWorker;
+    if (!window.Tesseract) await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+    $("#progTxt").textContent = "正在下載中文辨識資料（只在讀取案類時需要，第一次會比較久）…";
+    chiWorker = await Tesseract.createWorker("chi_tra", 1, { logger: (m) => { if (m.status && /loading|initializ/.test(m.status)) $("#progTxt").textContent = "準備中文辨識… " + Math.round((m.progress || 0) * 100) + "%"; } });
+    return chiWorker;
+  }
+  async function ocrCat(full) {
+    const w = await ensureChi();
+    await w.setParameters({ tessedit_pageseg_mode: "6" });
+    const band = cropC(full, 0.05, 0.30, 0.60, 0.72, 1);
+    const r = await w.recognize(band);
+    return parseCat(r.data.text || "");
+  }
+  async function runCat(r) {
+    $("#catNote").textContent = "辨識中…（第一次要下載中文資料）";
+    try {
+      const full = await renderFull(r), c = await ocrCat(full);
+      full.width = full.height = 1;
+      if (!r.touched.cat) { if (c) { r.cat = c; r.catFlag = "自動辨識，請核對"; } else r.catFlag = "沒讀到，請照單子上的「觸犯法條」輸入"; }
+    } catch (e) { r.catFlag = "無法辨識（" + (e && e.message ? e.message : e) + "），請手動輸入"; }
+    if (pages[cur] === r) renderForm(); else renderTable();
+  }
+  async function processPage(rec) {
+    rec.status = "busy"; refreshStatus();
+    const full = await renderFull(rec);
     const view = cropC(full, 0, 0, 1, 1, Math.min(1, 1200 / full.width));
     rec.img = url(view, 0.82);
     rec.strip = url(cropC(full, 0.84, 0, 1, 1, Math.min(1, 1000 / full.height)), 0.85);
@@ -479,7 +529,7 @@
     if (st) { rec.sticky = true; rec.stickyImg = url(cropPx(full, st[0] - 10, st[1] - 10, st[2] + 20, st[3] + 20, Math.min(1.5, 700 / (st[2] + 20))), 0.9); rec.type = "cap"; }
     const bt = analyzeBottom(full);
     if (bt && bt.num) rec.numImg = url(cropPx(full, bt.num[0], bt.num[1], bt.num[2], bt.num[3], 1), 0.9);
-    if (bt && bt.date) rec.dateImg = url(cropPx(full, bt.date[0], bt.date[1], bt.date[2], bt.date[3], 1), 0.9);
+    if (bt && bt.date && !rec.nameDate) rec.dateImg = url(cropPx(full, bt.date[0], bt.date[1], bt.date[2], bt.date[3], 1), 0.9);
     if (worker) {
       try {
         const r = await ocrCode(full);
@@ -487,9 +537,9 @@
           rec.codeImg = r.img;
           if (r.best) { rec.code = r.best.code; rec.codeFlags = r.best.flags; rec.codeSoft = r.best.soft || ""; } else rec.codeFlags = ["沒有讀到案號，請對照圖片輸入"];
         }
-        if (bt && bt.date && !rec.touched.date) {
+        if (bt && bt.date && !rec.nameDate) {
           const c = cropPx(full, bt.date[0], bt.date[1], bt.date[2], bt.date[3], 3), d = await recog(c, "0123456789/", 7, false), dt = parseDate(d.text || "");
-          if (dt) { rec.date = dt; rec.dateFlag = ""; }
+          if (dt) rec.ocrDate = dt;
         }
         if (bt && bt.num && !rec.touched.docNo) {
           const c = cropPx(full, bt.num[0], bt.num[1], bt.num[2], bt.num[3], 3), d = await recog(c, "0123456789", 7, false), dn = parseDoc(d.text || "");
@@ -497,12 +547,25 @@
         }
       } catch (e) { rec.err = "辨識失敗：" + (e && e.message ? e.message : e); }
     }
-    if (!rec.touched.date && !rec.date) {
-      const def = normDate($("#defDate").value), dd = def || prevDate(rec);
-      if (dd) { rec.date = dd; rec.dateFlag = def ? "" : "沿用前一頁的日期，請核對"; } else rec.dateFlag = "沒讀到日期，請輸入";
+    if (rec.type === "cap" && worker && !rec.touched.cat) {
+      try { const c = await ocrCat(full); if (c) { rec.cat = c; rec.catFlag = "自動辨識，請核對"; } else rec.catFlag = "沒讀到，請照單子上的「觸犯法條」輸入"; }
+      catch (e) { rec.catFlag = "無法辨識中文（" + (e && e.message ? e.message : e) + "），請手動輸入"; }
     }
+    applyDate(rec, "");
     rec.status = "ok";
     full.width = full.height = 1;
+  }
+  /* 一個檔案就是同一天：檔名日期 > 該檔多數頁讀到的貼紙日期 > 預設日期 > 前一頁 */
+  function applyDate(rec, maj) {
+    if (rec.touched.date) return;
+    const nd = rec.nameDate, def = normDate($("#defDate").value), d = nd || maj || rec.ocrDate || def || prevDate(rec);
+    rec.date = d || "";
+    rec.dateFlag = !d ? "沒讀到日期，請輸入" : nd && maj && nd !== maj ? "檔名日期（" + nd + "）和貼紙多數日期（" + maj + "）不同，已採用檔名，請確認" : !(nd || maj || rec.ocrDate || def) ? "沿用前一頁的日期，請核對" : "";
+  }
+  function fixFileDates() {
+    const cnt = {};
+    pages.forEach((p) => { if (p.ocrDate) { cnt[p.fi] = cnt[p.fi] || {}; cnt[p.fi][p.ocrDate] = (cnt[p.fi][p.ocrDate] || 0) + 1; } });
+    pages.forEach((p) => { const c = cnt[p.fi]; applyDate(p, c ? Object.keys(c).sort((a, b) => c[b] - c[a])[0] : ""); });
   }
   function prevDate(rec) { const i = pages.indexOf(rec); for (let k = i - 1; k >= 0; k--) if (pages[k].date) return pages[k].date; return ""; }
 
@@ -522,10 +585,11 @@
       if (cur < 0 && rec.status === "ok") go(i);
       await tick();
     }
+    fixFileDates();
     $("#progTxt").textContent = ocrStop ? "已停止（已處理 " + done + " / " + total + " 頁）" : "辨識完成，共 " + total + " 頁。請逐頁核對標黃的欄位。";
     ocrRunning = false; $("#stopOcr").hidden = true;
     if (worker) { try { await worker.terminate(); } catch (e) {} worker = null; }
-    renderTable();
+    renderForm();
   }
   $("#stopOcr").addEventListener("click", () => { ocrStop = true; });
 
@@ -586,18 +650,18 @@
     const r = pages[cur]; if (!r) return;
     $("#pageImg").src = r.img || ""; $("#pgNo").textContent = (cur + 1) + " / " + pages.length + "　" + r.src;
     document.querySelectorAll("input[name=type]").forEach((x) => (x.checked = x.value === r.type));
-    $("#codeLb").textContent = r.type === "cap" ? "發生案號（案件編號）" : "E化案號";
+    $("#codeLb").textContent = r.type === "cap" ? "E化案號（案件編號）" : "E化案號";
     F.code.value = r.code; setImg($("#codeImg"), r.codeImg);
     const stn = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = stn ? stn + "派出所" : "";
     const fl = r.codeFlags || []; $("#fCode").classList.toggle("uncertain", fl.length > 0 || (r.status === "ok" && !r.code));
     $("#codeNote").textContent = fl.length ? "請對照上方圖片核對：" + fl.join("、") : r.code ? (r.codeSoft || "已依案號規則校正。") : "";
     F.who.value = r.who; setImg($("#stripImg"), r.strip);
     F.date.value = r.date; setImg($("#dateImg"), r.dateImg);
-    $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || "";
+    $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || (r.nameDate && r.date === r.nameDate ? "取自檔名" : "");
     $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
     F.caseNo.value = r.caseNo; F.realWho.value = r.realWho;
     $("#realHint").textContent = r.sticky ? "" : "沒有便條紙：實際承辦人會填成上面的承辦人，發生文號留空。";
-    $("#capBox").hidden = r.type !== "cap"; F.cat.value = r.cat; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
+    $("#capBox").hidden = r.type !== "cap"; F.cat.value = r.cat; $("#fCat").classList.toggle("uncertain", !!r.catFlag); $("#catNote").textContent = r.catFlag || ""; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
     $("#fDoc").classList.toggle("uncertain", !!r.docFlag); $("#docNote").textContent = r.docFlag || "";
     $("#skip").checked = r.skip;
     $("#prev").disabled = cur <= 0; $("#next").disabled = cur >= pages.length - 1;
@@ -616,9 +680,11 @@
   bind("who"); bind("realWho");
   bind("date", (r) => { r.dateFlag = ""; $("#fDate").classList.remove("uncertain"); $("#dateNote").textContent = ""; });
   bind("caseNo", (r) => { r.caseNo = F.caseNo.value.replace(/\D/g, ""); });
-  bind("cat"); bind("docNo", (r) => { r.docNo = F.docNo.value.replace(/\D/g, ""); r.docFlag = ""; $("#fDoc").classList.remove("uncertain"); $("#docNote").textContent = ""; });
+  bind("cat", (r) => { r.catFlag = ""; $("#fCat").classList.remove("uncertain"); $("#catNote").textContent = ""; });
+  $("#catOcr").addEventListener("click", () => { const r = pages[cur]; if (r) { r.touched.cat = false; runCat(r); } });
+  bind("docNo", (r) => { r.docNo = F.docNo.value.replace(/\D/g, ""); r.docFlag = ""; $("#fDoc").classList.remove("uncertain"); $("#docNote").textContent = ""; });
   F.date.addEventListener("blur", () => { const r = pages[cur]; if (!r) return; const d = normDate(F.date.value); if (d) { r.date = d; F.date.value = d; renderTable(); } });
-  document.querySelectorAll("input[name=type]").forEach((x) => x.addEventListener("change", () => { const r = pages[cur]; if (!r) return; r.type = x.value; r.touched.type = true; renderForm(); }));
+  document.querySelectorAll("input[name=type]").forEach((x) => x.addEventListener("change", () => { const r = pages[cur]; if (!r) return; r.type = x.value; r.touched.type = true; renderForm(); if (r.type === "cap" && !r.cat && !r.touched.cat && r.status === "ok") runCat(r); }));
   $("#sticky").addEventListener("change", () => { const r = pages[cur]; r.sticky = $("#sticky").checked; r.touched.sticky = true; renderForm(); });
   $("#skip").addEventListener("change", () => { pages[cur].skip = $("#skip").checked; renderTable(); });
   function whoEnter(key, next) {
@@ -634,17 +700,17 @@
   /* ================= 表格與匯出 ================= */
   function derive(r) {
     const cap = r.type === "cap", real = r.sticky && r.realWho ? r.realWho : r.who;
-    return [r.who, cap ? "" : r.code, cap ? r.code : "", r.sticky ? r.caseNo : "", real, cap ? r.cat : "", cap ? r.docNo : "", r.date];
+    return [r.who, r.code, "", r.sticky ? r.caseNo : "", real, cap ? r.cat : "", cap ? r.docNo : "", r.date];
   }
   function renderTable() {
     const tb = $("#tbl tbody"); if (!tb) return;
     let miss = 0;
     tb.innerHTML = pages.map((r, i) => {
       const v = derive(r), cap = r.type === "cap";
-      const need = [!v[0], !(cap ? v[2] : v[1]), false, false, !v[4], cap && !v[5], cap && !v[6], !v[7]];
+      const need = [!v[0], !v[1], false, false, !v[4], cap && !v[5], cap && !v[6], !v[7]];
       const mm = r.skip ? 0 : need.filter(Boolean).length; miss += mm;
       const td = (j, t) => '<td class="' + (!r.skip && need[j] ? "miss" : "") + '">' + (esc(t || "") || (!r.skip && need[j] ? "缺" : "")) + "</td>";
-      const unc = (r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag;
+      const unc = (r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag || r.catFlag;
       return '<tr data-i="' + i + '" class="' + (i === cur ? "cur " : "") + (r.skip ? "skip" : "") + '"><td>' + (i + 1) + "</td><td>" + esc(r.src) + (r.status === "ok" ? "" : r.status === "busy" ? "（辨識中）" : r.status === "err" ? "（失敗）" : "（等待）") + (unc ? " ⚠" : "") + "</td><td>" + (cap ? "破獲" : "發生") + "</td>" +
         td(0, v[0]) + td(1, v[1]) + td(2, v[2]) + td(3, v[3]) + td(4, v[4]) + td(5, v[5]) + td(6, v[6]) + td(7, v[7]) + "</tr>";
     }).join("");
