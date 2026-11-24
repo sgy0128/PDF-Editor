@@ -136,6 +136,39 @@
   }
   @media (max-width: 900px) { .work { grid-template-columns: 1fr; height: auto; } .viewer { height: 60vh; } #panel { height: auto; overflow: visible; } }
 </style>
+<style>
+  #dupBox > summary { cursor: pointer; }
+  #dupBox .panel { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  #dupBox .panel.over { border-color: var(--accent); background: var(--accent-soft); }
+  #dupBox textarea { width: 100%; min-height: 130px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: .85rem/1.45 ui-monospace, Consolas, "Microsoft JhengHei", monospace; resize: vertical; white-space: pre; overflow: auto; }
+  #dupBox select { padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); font: inherit; min-width: 0; width: 100%; }
+  #dupBox h3 { font-size: 1rem; margin: 0 0 4px; }
+  #dupBox .cfg { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-top: 10px; }
+  #dupBox label.f { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); flex: 1 1 200px; min-width: 0; }
+  #dupBox label.chk { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: .9rem; }
+  #dupBox .opts { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+  #dupBox .sum { padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
+  #dupBox .sum.ok { background: #dcf5e8; color: #138a5a; }
+  #dupBox .sum.warn { background: #fff1c2; color: #7a5a00; }
+  :root[data-theme="dark"] #dupBox .sum.ok { background: #123a2a; color: #5fd3a0; }
+  :root[data-theme="dark"] #dupBox .sum.warn { background: #4a3a10; color: #f6d77a; }
+  #dupBox .res { margin-top: 16px; }
+  #dupBox .reshead { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  #dupBox .reshead .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  #dupBox .tw { max-height: 420px; }
+  #dupBox table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+  #dupBox th, #dupBox td { padding: 5px 9px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  #dupBox td.ln { color: var(--muted); text-align: right; }
+  #dupBox tr.dup td { background: #fff1c2; color: #7a5a00; }
+  :root[data-theme="dark"] #dupBox tr.dup td { background: #4a3a10; color: #f6d77a; }
+  #dupBox td.key { font-weight: 700; }
+  #dupBox .tag { display: inline-block; padding: 0 8px; border-radius: 999px; background: #e0b84a; color: #1a1405; font-size: .75rem; font-weight: 700; margin-right: 6px; }
+  #dupBox .mute { color: var(--muted); font-size: .78rem; }
+  #dcMsg { display: none; padding: 8px 12px; border-radius: 6px; background: var(--accent-soft); margin-top: 8px; }
+  #dcMsg.show { display: block; }
+  #dcMsg.err { background: #fdecec; color: #c62828; }
+  @media (max-width: 760px) { #dupBox .two { grid-template-columns: 1fr; } }
+</style>
 </head>
 <body>
 <div id="dropOv" aria-hidden="true"><b>放開即可加入檔案</b></div>
@@ -312,6 +345,22 @@
     <p class="hint">複製的欄位順序和你的登記表一致：承辦人、E化案號、發生案號、發生文號、實際承辦人、案類、文號、收文日期。直接貼到登記表第一個空白列的 A 欄，公式不會被蓋掉。</p>
   </aside>
   </section>
+
+  <details class="box" id="dupBox">
+    <summary><h2 style="display:inline">4. 重複比對（和其他表格比對案號）</h2></summary>
+    <p class="hint">把別的網頁或 Excel 的表格貼進 B 表，就會和上面登記的資料比對案號，兩邊都有的標成黃色。資料只在瀏覽器內處理。</p>
+    <div class="two" id="dcPanels" style="margin-top:10px"></div>
+    <div class="opts" style="margin-top:12px">
+      <label class="chk"><input type="checkbox" id="oSpace" checked>忽略空白與英文大小寫</label>
+      <label class="chk"><input type="checkbox" id="oWidth" checked>全形、半形視為相同</label>
+      <label class="chk"><input type="checkbox" id="oSym">忽略橫線、底線、句點等符號</label>
+    </div>
+    <div class="sum" id="sum" style="margin-top:12px">請先貼上要比對的表格。</div>
+    <div class="row" style="margin:0 0 4px"><label class="chk"><input type="checkbox" id="only">只顯示重複的列</label></div>
+    <div id="dcMsg" role="status"></div>
+    <div id="resA" class="res"></div>
+    <div id="resB" class="res"></div>
+  </details>
 
 </main>
 
@@ -1382,6 +1431,322 @@
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "登記"); XLSX.writeFile(wb, "陳報單登記.xlsx");
     } catch (e) { show("無法產生 Excel（" + (e && e.message ? e.message : e) + "），請改用「複製」或「下載 CSV」。", "warn"); }
   });
+  /* ===== 4. 重複比對 ===== */
+  (function () {
+
+  const KEY = "pdf-register-dup-v1", LIMIT = 3000;
+  const NAMES = { a: "A 表：目前這頁登記的資料", b: "B 表：要拿來比對的表格（其他網頁或 Excel）" };
+  const HINTS = { a: "從別的網頁複製表格，貼在這裡。", b: "貼上登記表「複製（貼到 Excel）」的內容，或選你匯出的 Excel／CSV 檔。" };
+  const side = { a: mkSide(), b: mkSide() };
+  function mkSide() { return { live: false, rows: [], col: 0, header: false, userCol: false, userHdr: false, auto: true, noId: false }; }
+
+  /* ---------- 畫面 ---------- */
+  $("#dcPanels").innerHTML =
+    '<div class="panel" id="aPanel"><h3>' + NAMES.a + '</h3><p class="hint">自動帶入上面「3. 檢查與匯出」表格裡的內容（不含已略過的頁），你修改後會跟著更新。</p>' +
+    '<div class="row"><button type="button" id="aReload">重新帶入</button></div>' +
+    '<details id="aAdv" style="margin-top:8px"><summary class="mute" id="aSum">只比對 E化案號</summary><div class="cfg"><label class="f">要比對的欄位<select id="aCol"></select></label><input type="checkbox" id="aHdr" checked hidden></div></details>' +
+    '<p class="hint" id="aInfo"></p></div>' +
+    '<div class="panel" id="bPanel"><h3>' + NAMES.b + '</h3><p class="hint">從別的網頁複製表格貼在這裡，或選 Excel／CSV 檔。</p>' +
+    '<textarea id="bText" spellcheck="false" placeholder="在這裡按 Ctrl + V 貼上表格（可以直接從網頁或 Excel 複製）"></textarea>' +
+    '<div class="row"><button type="button" id="bPick">改選檔案…</button><button type="button" id="bClear">清除</button>' +
+    '<input type="file" id="bFile" accept=".xlsx,.csv,.tsv,.txt,.tab" hidden></div>' +
+    '<details id="bAdv" style="margin-top:8px"><summary class="mute" id="bSum">只比對案號（自動判斷）</summary><div class="cfg"><label class="f">案號在哪一欄<select id="bCol"></select></label>' +
+    '<label class="chk"><input type="checkbox" id="bHdr">第一列是標題列</label></div></details>' +
+    '<p class="hint" id="bInfo"></p></div>';
+
+  function show(t, err) { const m = $("#dcMsg"); m.textContent = t; m.className = "show" + (err ? " err" : ""); }
+  function hide() { $("#dcMsg").className = ""; }
+
+  /* ---------- 解析貼上的文字 ---------- */
+  const trimCell = (s) => s.replace(/^[\s 　]+|[\s 　]+$/g, "");
+  function parseText(t) {
+    t = t.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+    const head = t.split("\n").slice(0, 20).join("\n");
+    const d = /\t/.test(head) ? "\t" : /,/.test(head) ? "," : "";
+    const rows = []; let row = [], f = "", q = false;
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (q) { if (ch === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch; continue; }
+      if (ch === '"' && f === "") { q = true; continue; }
+      if (d && ch === d) { row.push(f); f = ""; }
+      else if (ch === "\n") { row.push(f); rows.push(row); row = []; f = ""; }
+      else f += ch;
+    }
+    if (f !== "" || row.length) { row.push(f); rows.push(row); }
+    return cleanRows(rows);
+  }
+  function cleanRows(rows) {
+    rows = rows.map((r) => r.map((c) => trimCell(String(c == null ? "" : c))));
+    while (rows.length && rows[rows.length - 1].every((c) => c === "")) rows.pop();
+    const w = rows.reduce((m, r) => Math.max(m, r.length), 0);
+    rows.forEach((r) => { while (r.length < w) r.push(""); });
+    return rows;
+  }
+
+  /* ---------- 讀 xlsx（不需要任何函式庫） ---------- */
+  async function inflateRaw(u8) {
+    const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function unzip(buf) {
+    const dv = new DataView(buf), u8 = new Uint8Array(buf), dec = new TextDecoder();
+    let e = -1;
+    for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { e = i; break; }
+    if (e < 0) throw new Error("這不是有效的 xlsx 檔");
+    const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true); const files = {};
+    for (let k = 0; k < n; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+      files[dec.decode(u8.subarray(p + 46, p + 46 + nl))] = { method: dv.getUint16(p + 10, true), csize: dv.getUint32(p + 20, true), off: dv.getUint32(p + 42, true) };
+      p += 46 + nl + el + cl;
+    }
+    return {
+      names: Object.keys(files),
+      async get(name) {
+        const f = files[name]; if (!f) return null;
+        const s = f.off + 30 + dv.getUint16(f.off + 26, true) + dv.getUint16(f.off + 28, true), data = u8.subarray(s, s + f.csize);
+        return dec.decode(f.method === 0 ? data : await inflateRaw(data));
+      }
+    };
+  }
+  async function readXlsx(buf) {
+    if (typeof DecompressionStream === "undefined") throw new Error("這個瀏覽器不能直接讀 xlsx，請改用複製貼上，或在 Excel 另存成 CSV");
+    const z = await unzip(buf), xml = (s) => new DOMParser().parseFromString(s, "application/xml");
+    const strs = [], sst = await z.get("xl/sharedStrings.xml");
+    if (sst) xml(sst).querySelectorAll("si").forEach((si) => strs.push(Array.from(si.getElementsByTagName("t")).filter((t) => t.parentNode.nodeName !== "rPh").map((t) => t.textContent).join("")));
+    let path = "";
+    const wb = await z.get("xl/workbook.xml"), rels = await z.get("xl/_rels/workbook.xml.rels");
+    if (wb && rels) {
+      const sh = xml(wb).querySelector("sheet");
+      const rid = sh && (sh.getAttribute("r:id") || sh.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"));
+      const rel = rid && Array.from(xml(rels).querySelectorAll("Relationship")).find((r) => r.getAttribute("Id") === rid);
+      if (rel) { const t = rel.getAttribute("Target") || ""; path = t.charAt(0) === "/" ? t.slice(1) : "xl/" + t.replace(/^\.\//, ""); }
+    }
+    if (!path || z.names.indexOf(path) < 0) path = z.names.filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort()[0];
+    const sx = path && await z.get(path);
+    if (!sx) throw new Error("找不到工作表");
+    const rows = [];
+    xml(sx).querySelectorAll("sheetData > row > c").forEach((c) => {
+      const m = /^([A-Z]+)(\d+)$/.exec(c.getAttribute("r") || ""); if (!m) return;
+      let col = 0; for (const ch of m[1]) col = col * 26 + ch.charCodeAt(0) - 64;
+      col--; const r = +m[2] - 1, t = c.getAttribute("t"), v = c.querySelector("v");
+      let val = "";
+      if (t === "s") val = strs[+(v ? v.textContent : -1)] || "";
+      else if (t === "inlineStr") val = Array.from(c.getElementsByTagName("t")).map((x) => x.textContent).join("");
+      else if (v) val = v.textContent;
+      (rows[r] = rows[r] || [])[col] = val.replace(/[\t\r\n]+/g, " ");
+    });
+    for (let i = 0; i < rows.length; i++) { rows[i] = rows[i] || []; for (let j = 0; j < rows[i].length; j++) if (rows[i][j] === undefined) rows[i][j] = ""; }
+    return cleanRows(rows);
+  }
+  function decodeText(buf) {
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+    catch (e) { try { return new TextDecoder("big5").decode(buf); } catch (x) { return new TextDecoder().decode(buf); } }
+  }
+  async function loadFile(k, file) {
+    hide();
+    try {
+      const buf = await file.arrayBuffer();
+      if (/\.xlsx$/i.test(file.name) || (new Uint8Array(buf, 0, 2)[0] === 0x50 && new Uint8Array(buf, 0, 2)[1] === 0x4b)) {
+        const rows = await readXlsx(buf);
+        $("#" + k + "Text").value = rows.map((r) => r.join("\t")).join("\n");
+        setRows(k, rows, true);
+      } else if (/\.xls$/i.test(file.name)) {
+        throw new Error("舊版 .xls 不支援，請在 Excel 另存成 .xlsx 或 CSV，或直接複製貼上");
+      } else {
+        const text = decodeText(buf);
+        $("#" + k + "Text").value = text.replace(/^﻿/, "");
+        setRows(k, parseText(text), true);
+      }
+    } catch (e) { show("讀取「" + file.name + "」失敗：" + (e && e.message ? e.message : e), true); }
+  }
+
+  /* ---------- 判斷哪一欄是案號 ---------- */
+  function looksId(v) { const s = String(v).toUpperCase().replace(/[\s\-_]/g, ""); return /^[A-Z0-9]{8,24}$/.test(s) && /\d/.test(s); }
+  function idScore(v) { const s = String(v).toUpperCase().replace(/[\s\-_]/g, ""); return looksId(v) ? (/[A-Z]/.test(s) ? 2 : 1) : 0; }
+  function autoCol(rows) {
+    const w = rows.length ? rows[0].length : 0; let best = 0, bs = 0;
+    for (let c = 0; c < w; c++) { let s = 0; rows.forEach((r) => { s += idScore(r[c]); }); if (s > bs) { bs = s; best = c; } }
+    return { col: best, found: bs > 0 };
+  }
+  function autoHeader(rows, col) {
+    if (rows.length < 2) return false;
+    const rest = rows.slice(1).filter((r) => looksId(r[col])).length;
+    return !looksId(rows[0][col]) && rest >= (rows.length - 1) * 0.5;
+  }
+  const start = (S) => (S.header ? 1 : 0);
+
+  function setRows(k, rows, fresh) {
+    const S = side[k]; S.rows = rows;
+    if (fresh) { S.userCol = false; S.userHdr = false; }
+    let w = rows.length ? rows[0].length : 0, a = autoCol(rows);
+    if (!S.live && a.found && fresh) {   /* 網頁複製常帶有標題文字：丟掉第一筆案號之前的雜訊，只保留真正的標題列 */
+      const f = rows.findIndex((r) => looksId(r[a.col]));
+      if (f > 0) { const hd = rows[f - 1], keep = hd.filter(Boolean).length >= Math.ceil(w / 2) ? [hd] : []; rows = keep.concat(rows.slice(f)); S.rows = rows; }
+    }
+    S.noId = !a.found;
+    if (!S.userCol || (S.col !== "all" && S.col >= w)) { S.col = a.col; S.auto = true; }
+    if (!S.userHdr) S.header = autoHeader(rows, S.col === "all" ? a.col : S.col);
+    buildSelect(k); refresh();
+  }
+  function buildSelect(k) {
+    const S = side[k], sel = $("#" + k + "Col"), w = S.rows.length ? S.rows[0].length : 0, o = [];
+    for (let c = 0; c < w; c++) {
+      let ex = S.header && S.rows[0][c] ? S.rows[0][c] : "";
+      if (!ex) { const r = S.rows.slice(start(S)).find((x) => x[c]); ex = r ? r[c] : "（空白）"; }
+      o.push('<option value="' + c + '">第 ' + (c + 1) + ' 欄：' + esc(ex.length > 22 ? ex.slice(0, 22) + "…" : ex) + "</option>");
+    }
+    if (w) o.push('<option value="all">所有欄位（整列任何一格相同就算重複）</option>');
+    sel.innerHTML = o.join("") || "<option>（還沒有資料）</option>";
+    sel.value = String(S.col); $("#" + k + "Hdr").checked = S.header; sel.disabled = !w; $("#" + k + "Hdr").disabled = !w;
+  }
+
+  /* ---------- 比對 ---------- */
+  const opt = { space: true, width: true, sym: false };
+  function readOpts() {
+    opt.space = $("#oSpace").checked; opt.width = $("#oWidth").checked; opt.sym = $("#oSym").checked;
+    try { localStorage.setItem(KEY, JSON.stringify(opt)); } catch (e) {}
+  }
+  function norm(v) {
+    let s = String(v);
+    if (opt.width) s = s.replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/　/g, " ");
+    s = opt.space ? s.replace(/[\s ]+/g, "").toUpperCase() : s.replace(/^\s+|\s+$/g, "");
+    if (opt.sym) s = s.replace(/[-_.\/\\,:;'"()\[\]‐-―−－ー]/g, "");
+    return s;
+  }
+  const rowKeys = (S, row) => Array.from(new Set((S.col === "all" ? row : [row[S.col]]).map((v) => norm(v == null ? "" : v)).filter(Boolean)));
+  function buildMap(S) {
+    const m = new Map();
+    S.rows.forEach((row, i) => { if (i < start(S)) return; rowKeys(S, row).forEach((key) => { if (!m.has(key)) m.set(key, []); m.get(key).push(i); }); });
+    return m;
+  }
+  let res = { a: [], b: [] };
+  function compute() {
+    const maps = { a: buildMap(side.a), b: buildMap(side.b) };
+    ["a", "b"].forEach((k) => {
+      const S = side[k], o = k === "a" ? "b" : "a";
+      res[k] = S.rows.map((row, i) => {
+        if (i < start(S)) return null;
+        const ks = rowKeys(S, row), hit = [], other = new Set();
+        ks.forEach((key) => { const m = maps[o].get(key); if (m) { hit.push(key); m.forEach((x) => other.add(x)); } });
+        return { keys: ks, hit, dup: hit.length > 0, other: Array.from(other).sort((x, y) => x - y), self: ks.some((key) => maps[k].get(key).length > 1) };
+      });
+    });
+  }
+
+  /* ---------- 顯示結果 ---------- */
+  const dataRows = (k) => Math.max(0, side[k].rows.length - start(side[k]));
+  const dupN = (k) => res[k].filter((r) => r && r.dup).length;
+  function summary() {
+    const el = $("#sum"), na = dataRows("a"), nb = dataRows("b");
+    if (!na || !nb) { el.className = "sum"; el.textContent = "請先在上面貼上兩份資料（" + (na ? "A 表已讀入" : "A 表還沒有資料") + "，" + (nb ? "B 表已讀入" : "B 表還沒有資料") + "）。"; return; }
+    const set = new Set(); res.a.forEach((r) => { if (r) r.hit.forEach((x) => set.add(x)); });
+    const da = dupN("a"), db = dupN("b");
+    if (!da && !db) { el.className = "sum ok"; el.textContent = "沒有找到重複的案號。A 表 " + na + " 列，B 表 " + nb + " 列，兩邊的案號完全不同。"; return; }
+    el.className = "sum warn";
+    el.textContent = "找到 " + set.size + " 個兩邊都有的案號：A 表有 " + da + " 列重複（共 " + na + " 列），B 表有 " + db + " 列重複（共 " + nb + " 列）。重複的列已標成黃色。";
+  }
+  function renderSide(k) {
+    const box = $("#res" + k.toUpperCase()), S = side[k], R = res[k];
+    if (!S.rows.length) { box.innerHTML = ""; return; }
+    const only = $("#only").checked, w = S.rows[0].length, st = start(S), all = S.col === "all";
+    let h = '<div class="reshead"><h3>' + NAMES[k] + '：' + dataRows(k) + ' 列，重複 ' + dupN(k) + ' 列</h3><div class="btns">' +
+      '<button type="button" data-act="mark" data-k="' + k + '" title="一列對一列，可以貼在原表格旁邊的空白欄">複製「重複」標記欄</button>' +
+      '<button type="button" data-act="keys" data-k="' + k + '">複製重複的案號</button>' +
+      '<button type="button" data-act="rows" data-k="' + k + '">複製重複的列</button></div></div>';
+    h += '<div class="tw"><table><thead><tr><th>列</th><th>比對結果</th>';
+    for (let c = 0; c < w; c++) h += "<th>" + esc(S.header ? S.rows[0][c] || "欄 " + (c + 1) : "欄 " + (c + 1)) + "</th>";
+    h += "</tr></thead><tbody>";
+    let shown = 0, cut = false;
+    for (let i = st; i < S.rows.length; i++) {
+      const r = R[i]; if (only && !r.dup) continue;
+      if (shown >= LIMIT) { cut = true; break; } shown++;
+      let mk = "";
+      if (r.dup) mk = '<span class="tag">重複</span><span class="mute">對方第 ' + r.other.slice(0, 6).map((x) => x + 1).join("、") + (r.other.length > 6 ? " …" : "") + " 列</span>";
+      else if (!r.keys.length && !all) mk = '<span class="mute">（這列沒有案號）</span>';
+      if (r.self) mk += ' <span class="mute">（本表內也重複）</span>';
+      h += '<tr class="' + (r.dup ? "dup" : "") + '"><td class="ln">' + (i + 1) + "</td><td>" + mk + "</td>";
+      for (let c = 0; c < w; c++) {
+        const isKey = all ? r.hit.indexOf(norm(S.rows[i][c])) >= 0 && S.rows[i][c] !== "" : c === S.col;
+        h += '<td class="' + (isKey ? "key" : "") + '">' + esc(S.rows[i][c]) + "</td>";
+      }
+      h += "</tr>";
+    }
+    h += "</tbody></table></div>";
+    if (cut) h += '<p class="hint">畫面只顯示前 ' + LIMIT + ' 列；上面的複製按鈕仍然包含全部。</p>';
+    else if (only && !shown) h += '<p class="hint">這一邊沒有重複的列。</p>';
+    box.innerHTML = h;
+  }
+  function refresh() { readOpts(); compute(); summary(); renderSide("a"); renderSide("b"); infoLines(); }
+  function infoLines() {
+    ["a", "b"].forEach((k) => {
+      const S = side[k], w = S.rows.length ? S.rows[0].length : 0;
+      const nm = S.col === "all" ? "所有欄位" : S.rows.length && S.rows[0][S.col] !== undefined ? "第 " + (S.col + 1) + " 欄" + (S.header && S.rows[0][S.col] ? "「" + S.rows[0][S.col] + "」" : "") : "";
+      $("#" + k + "Sum").textContent = k === "a" ? "只比對 " + (S.col === 1 ? "E化案號" : nm || "E化案號") + "（點此可改）" : S.noId ? "看不出案號在哪一欄，請點這裡自己選" : "只比對案號" + (S.userCol ? "（" + nm + "）" : "（自動判斷：" + nm + "）") + "，點此可改";
+      if (k === "b") $("#bAdv").open = $("#bAdv").open || (S.noId && !!S.rows.length);
+      $("#" + k + "Info").textContent = !S.rows.length ? (S.live ? "上面還沒有登記資料。" : "") : S.live ? "已帶入 " + (S.rows.length - 1) + " 列。" :
+        "已讀入 " + S.rows.length + " 列、" + w + " 欄。" + (S.noId ? "看不出哪一欄是案號，請自己選。" : S.userCol ? "" : "已自動判斷案號欄，不對的話請自己改。");
+    });
+  }
+
+  /* ---------- 複製 ---------- */
+  async function copyText(t, what) {
+    try { await navigator.clipboard.writeText(t); }
+    catch (e) {
+      const ta = document.createElement("textarea"); ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select(); let ok = false; try { ok = document.execCommand("copy"); } catch (x) {} ta.remove();
+      if (!ok) { show("無法自動複製，請改用手動選取。", true); return; }
+    }
+    show("已複製" + what + "。");
+  }
+  const tsv = (rows) => rows.map((r) => r.map((c) => String(c).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+  function doCopy(k, act) {
+    const S = side[k], R = res[k], st = start(S);
+    if (act === "mark") { const lines = S.rows.map((r, i) => (i < st ? "重複比對" : R[i].dup ? "重複" : "")); if (S.live) lines.shift(); copyText(lines.join("\n"), "「重複」標記欄（共 " + lines.length + " 列，順序和上面的檢查表一樣）"); }
+    else if (act === "keys") {
+      const seen = new Set(), out = [];
+      S.rows.forEach((row, i) => { const r = R[i]; if (!r || !r.dup) return; row.forEach((v, c) => { const n = norm(v); if (n && r.hit.indexOf(n) >= 0 && (S.col === "all" || c === S.col) && !seen.has(n)) { seen.add(n); out.push(v); } }); });
+      if (!out.length) { show("沒有重複的案號可以複製。"); return; }
+      copyText(out.join("\n"), "重複的案號（" + out.length + " 個）");
+    } else {
+      const out = []; if (S.header) out.push(S.rows[0]);
+      S.rows.forEach((row, i) => { if (R[i] && R[i].dup) out.push(row); });
+      if (out.length <= st) { show("沒有重複的列可以複製。"); return; }
+      copyText(tsv(out), "重複的列（" + (out.length - st) + " 列）");
+    }
+  }
+  document.addEventListener("click", (e) => { const b = e.target.closest("button[data-act]"); if (b) doCopy(b.dataset.k, b.dataset.act); });
+
+  /* ---------- 事件 ---------- */
+  function pullA() {
+    const S = side.a, out = rowsOut();
+    S.live = true; S.header = true; S.userHdr = true; S.noId = false;
+    S.rows = out.length ? [HEAD.slice()].concat(out.map((r) => r.map(String))) : [];
+    if (!S.userCol) S.col = 1;
+    buildSelect("a"); refresh();
+  }
+  $("#aCol").addEventListener("change", (e) => { const v = e.target.value; side.a.col = v === "all" ? "all" : +v; side.a.userCol = true; buildSelect("a"); refresh(); });
+  $("#aReload").addEventListener("click", pullA);
+  (function () {
+    const k = "b"; let timer;
+    $("#bText").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { hide(); const fresh = !side.b.rows.length; setRows("b", parseText($("#bText").value), fresh); }, 200); });
+    $("#bCol").addEventListener("change", (e) => { const v = e.target.value; side.b.col = v === "all" ? "all" : +v; side.b.userCol = true; if (!side.b.userHdr) side.b.header = autoHeader(side.b.rows, v === "all" ? autoCol(side.b.rows).col : +v); buildSelect("b"); refresh(); });
+    $("#bHdr").addEventListener("change", (e) => { side.b.header = e.target.checked; side.b.userHdr = true; buildSelect("b"); refresh(); });
+    $("#bPick").addEventListener("click", () => $("#bFile").click());
+    $("#bFile").addEventListener("change", (e) => { const f = e.target.files[0]; e.target.value = ""; if (f) loadFile("b", f); });
+    $("#bClear").addEventListener("click", () => { $("#bText").value = ""; side.b = mkSide(); hide(); buildSelect("b"); refresh(); });
+    const p = $("#bPanel");
+    p.addEventListener("dragover", (e) => { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0) { e.preventDefault(); p.classList.add("over"); } });
+    p.addEventListener("dragleave", () => p.classList.remove("over"));
+    p.addEventListener("drop", (e) => { p.classList.remove("over"); const f = e.dataTransfer && e.dataTransfer.files[0]; if (f) { e.preventDefault(); loadFile("b", f); } });
+  })();
+  ["oSpace", "oWidth", "oSym", "only"].forEach((id) => $("#" + id).addEventListener("change", refresh));
+  try { const s = JSON.parse(localStorage.getItem(KEY) || "null"); if (s) { $("#oSpace").checked = s.space !== false; $("#oWidth").checked = s.width !== false; $("#oSym").checked = !!s.sym; } } catch (e) {}
+  ["a", "b"].forEach(buildSelect); pullA();
+  let pt; new MutationObserver(() => { clearTimeout(pt); pt = setTimeout(() => { if ($("#dupBox").open) pullA(); }, 300); }).observe($("#tbl tbody"), { childList: true });
+  $("#dupBox").addEventListener("toggle", () => { if ($("#dupBox").open) pullA(); });
+  })();
+
 })();
 </script>
 <script>
