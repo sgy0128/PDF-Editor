@@ -261,7 +261,7 @@
 
       <div class="grp">
         <div class="field">
-          <label class="chk"><input type="checkbox" id="sticky">有便條紙</label>
+          <label class="chk"><input type="checkbox" id="sticky">有便條紙或移轉他轄</label>
         </div>
         <div id="stickyBox" hidden>
           <img class="crop" id="stickyImg" alt="" hidden style="max-height:140px">
@@ -1260,7 +1260,7 @@
     $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || (r.nameDate && r.date === r.nameDate ? "取自檔名" : "");
     $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
     F.caseNo.value = r.caseNo; F.occNo.value = r.occNo; F.realWho.value = r.realWho;
-    $("#realHint").textContent = r.sticky ? (r.aiMissS || "") : "沒有便條紙：實際承辦人會填成上面的承辦人。";
+    $("#realHint").textContent = r.sticky ? (r.aiMissS || "") : "沒有便條紙或移轉他轄：實際承辦人會填成上面的承辦人。";
     $("#capBox").hidden = r.type !== "cap" && r.type !== "xfer"; F.cat.value = r.cat; $("#fCat").classList.toggle("uncertain", !!r.catFlag); $("#catNote").textContent = r.catFlag || ""; F.docNo.value = r.docNo; setImg($("#docImg"), r.numImg);
     $("#fDoc").classList.toggle("uncertain", !!r.docFlag); $("#docNote").textContent = r.docFlag || "";
     $("#skip").checked = r.skip;
