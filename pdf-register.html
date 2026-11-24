@@ -192,7 +192,7 @@
       </div>
       <p class="hint" id="aiInfo"></p>
     </div>
-    <p class="hint">AI 讀到的內容只會填在沒有被你手動改過的欄位，並標成 ⚠ 請你核對；承辦人一律對照名單，名單裡找不到的不會填。你手動更正承辦人後，按「複製」或下載時會記住「AI 讀到的字 → 正確名字」，下次遇到同樣的字就直接套用（只記 2 個字以上的字跡，只存在這台電腦的瀏覽器）。</p>
+    <p class="hint">AI 讀到的內容只會填在沒有被你手動改過的欄位，並標成 ⚠ 請你核對；承辦人一律對照名單，名單裡找不到的不會填。你手動更正承辦人後，按「複製」或下載時會記住「AI 讀到的字 → 正確名字」，下次遇到同樣的字就直接套用（單字也會記；只存在這台電腦的瀏覽器）。</p>
   </section>
 
   <section class="box">
@@ -792,14 +792,14 @@
   const aiReady = () => AI.on && AI.key.length > 10 && !aiFatal;
   const aiS = (v) => (v == null ? "" : String(v)).trim();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  /* 記住你的更正：AI 讀到的手寫字 → 你改成的名字（只存在這台瀏覽器；只記 2 個字以上，避免單字對應到不同人） */
+  /* 記住你的更正：AI 讀到的手寫字 → 你改成的名字（只存在這台瀏覽器） */
   const KEY_FIX = "pdf-register-fixes";
   const fixNorm = (t) => aiS(t).replace(/\s+/g, "");
   function fixLoad() { try { const o = JSON.parse(lsGet(KEY_FIX) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } }
   function learnFixes() {
     try {
       const f = fixLoad(); let n = 0;
-      const add = (raw, name) => { raw = fixNorm(raw); if (raw.length < 2 || !roster.includes(name) || f[raw] === name) return; delete f[raw]; f[raw] = name; n++; };
+      const add = (raw, name) => { raw = fixNorm(raw); if (!raw || !roster.includes(name) || f[raw] === name) return; delete f[raw]; f[raw] = name; n++; };
       pages.forEach((r) => {
         if (r.skip || r.type === "xfer") return;
         if (r.touched.who && r.aiWhoRaw && r.who !== r.aiWho) add(r.aiWhoRaw, r.who);
