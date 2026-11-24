@@ -71,7 +71,7 @@
   .field.bad input[type=text] { border-color: var(--danger); background: var(--danger-soft); }
   .field.bad .note { color: var(--danger); }
   .crop { display: block; max-width: 100%; max-height: 90px; margin-bottom: 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
-  .strip { display: block; max-height: 300px; max-width: 100%; cursor: zoom-in; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+  .strip { display: block; max-height: 200px; max-width: 100%; cursor: zoom-in; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .chips button { padding: 3px 10px; border-radius: 999px; background: var(--accent-soft); border-color: var(--accent); }
   .grp { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 2px; }
@@ -79,6 +79,8 @@
   th, td { border-bottom: 1px solid var(--line); padding: 5px 7px; text-align: left; white-space: nowrap; }
   th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
   tr.cur td { background: var(--accent-soft); }
+  td.nolist { color: #b45309; font-weight: 600; }
+  :root[data-theme="dark"] td.nolist { color: #fbbf24; }
   tr.skip td { opacity: .45; text-decoration: line-through; }
   tr { cursor: pointer; }
   td.miss { color: var(--danger); }
@@ -272,6 +274,7 @@
       <div class="field" id="fWho">
         <div class="lb"><span>承辦人（右邊緣手寫的字）</span></div>
         <img class="strip" id="stripImg" alt="" hidden>
+        <div class="hint" id="stripHint" hidden></div>
         <input id="who" type="text" spellcheck="false" autocomplete="off" placeholder="輸入名字裡的一個字，按 Enter 選取；再按 Enter 到下一頁">
         <div class="chips" id="whoChips"></div><datalist id="destList"><option value="中和"><option value="板橋"><option value="新莊"><option value="三峽"><option value="樹林"><option value="永和"></datalist>
         <div class="note" id="whoNote"></div>
@@ -372,6 +375,8 @@
   const KEY_R = "pdf-register-roster2", KEY_C = "pdf-register-cats";
   const STN = { O1: "土城", P1: "廣福", Q1: "清水", M1: "金城", R1: "頂埔", "91": "交通分隊" };
   const msg = $("#msg");
+  let listCodes = null;   /* 重複比對區貼上的案件列表：{ has(code), n }；只用來提醒，不會改案號 */
+  const notInList = (code) => !!(listCodes && code && !listCodes.has(code));
   function show(t, k) { msg.textContent = t; msg.className = "show" + (k ? " " + k : ""); }
   function hide() { msg.className = ""; }
   function tick() { return new Promise((r) => setTimeout(r, 0)); }
@@ -698,7 +703,7 @@
       if (v.length >= 10 && /Z[1IL]{2}5|AD[1IL]|[1I]{2}[59]/.test(v) && l.bbox) { box = l.bbox; break; }
     }
     let best = fixCode(d1.text || "");
-    let crop = null;
+    let crop = null, fallback = false;
     if (box) {
       const p = 16, bw = box.x1 - box.x0 + 2 * p + 70, bh = box.y1 - box.y0 + 2 * p;
       crop = cropPx(top, box.x0 - p, box.y0 - p, bw, bh, 2);
@@ -711,9 +716,9 @@
     if (!best || best.sc > 0) {
       const enlarged = cropPx(top, 0, 0, top.width, top.height, 1.6);
       const d3 = await recog(enlarged, ALNUM, 6, false), r3 = fixCode(d3.text || "");
-      if (r3 && (!best || r3.sc < best.sc)) { best = r3; if (!crop) crop = enlarged; }
+      if (r3 && (!best || r3.sc < best.sc)) { best = r3; if (!crop) { crop = enlarged; fallback = true; } }
     }
-    return { best, img: crop ? url(crop, 0.9) : "" };
+    return { best, img: crop ? url(crop, 0.9) : "", fallback };
   }
   async function renderFull(rec) {
     const doc = docs[rec.fi], pg = await doc.getPage(rec.n), v0 = pg.getViewport({ scale: 1 });
@@ -771,7 +776,7 @@
     cleanPage(full);
     const view = cropC(full, 0, 0, 1, 1, Math.min(1, 1600 / full.width));
     rec.img = url(view, 0.82);
-    rec.strip = url(cropC(full, 0.80, 0.62, 1, 1, 1), 0.9);
+    rec.strip = rec.stripFull = url(cropC(full, 0.80, 0.62, 1, 1, 1), 0.9); rec.showFull = false;
     const st = st0;
     if (st) { rec.sticky = true; rec.stickyImg = url(cropPx(full, st[0] - 10, st[1] - 10, st[2] + 20, st[3] + 20, Math.min(1.5, 700 / (st[2] + 20))), 0.9); rec.type = "cap"; }
     const bt = bt0;
@@ -781,7 +786,7 @@
       try {
         const r = await ocrCode(full);
         if (!rec.touched.code) {
-          rec.codeImg = r.img;
+          rec.codeImg = r.img; rec.codeImgFb = !!r.fallback;
           if (r.best) { rec.code = r.best.code; rec.codeFlags = r.best.flags; rec.codeSoft = r.best.soft || ""; } else rec.codeFlags = ["沒有讀到案號，請對照圖片輸入"];
         }
         if (bt && bt.date && !rec.nameDate) {
@@ -990,8 +995,9 @@
       ' "type": "occ、cap、xfer 其中之一，看不出來回空字串。occ＝標題為「陳報單」（發生案件）；cap＝標題為「刑案呈報單」（破獲案件，有嫌疑人）；xfer＝右下邊緣手寫處寫的不是人名，而是轉往的分局名稱（請從文末的「分局名單」選）",\n' +
       ' "station_name": "標題或「查獲地點」裡的「○○派出所／分隊」，只回兩個字，例如 土城、廣福、清水、金城、頂埔、交通",\n' +
       ' "code": "E化案號，共 15 碼英數字，位於頁面上緣。格式：Z + 民國年3碼 + 月份2碼 + 9 + AD1 + 派出所代號2碼（O1、P1、Q1、M1、R1 或 91）+ 末3碼（全是數字）。請逐字照抄，字母 O 與數字 0、字母 I 與數字 1 請依這個格式判斷",\n' +
-      ' "code_box": "E化案號那一行字在「頁面上緣右側」那張圖裡的位置，格式 [ymin, xmin, ymax, xmax]，座標是 0 到 1000 的整數；看不到回空陣列",\n' +
+      ' "code_box": "那 15 碼 E化案號本身在「頁面上緣右側」那張圖裡的位置，格式 [ymin, xmin, ymax, xmax]，座標是 0 到 1000 的整數；請緊貼這串英數字，不要包含「案號」標籤、標題或其他欄位的字；看不到回空陣列",\n' +
       ' "who": "「右下邊緣」那張圖上手寫的承辦人（可能只寫姓名中的一兩個字，或是簽名）。請從這份名單選出最像的一位，回名單上的全名，無法確定就回空字串。名單：' + roster.join("、") + '。若是 xfer，填轉往的分局名稱",\n' +
+      ' "who_box": "手寫承辦人姓名（或簽名）在「右下邊緣」那張圖裡的位置，格式 [ymin, xmin, ymax, xmax]，座標 0 到 1000 的整數；只框住手寫的字本身，不要包含其他印刷文字、條碼或空白；看不到回空陣列",\n' +
       ' "who_raw": "你在那張圖上實際看到的字，照抄",\n' +
       ' "who_candidates": ["無法確定時，列出最多 3 位名單中可能的人；否則回空陣列"],\n' +
       ' "has_sticky": "true 或 false：這一頁是否貼有黃色或橘色的便條紙",\n' +
@@ -1015,13 +1021,28 @@
       const j = aiJson(aiText(js));
       /* 只用 AI 時沒有本機的案號裁切圖：依 AI 回報的位置裁出案號那一行，位置不合理就放整個上緣 */
       const top = shots.find((x) => x.tag === "top");
-      if (top && !rec.codeImg) {
-        const b = j.code_box, ok = Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === "number" && n >= 0 && n <= 1000) && b[2] > b[0] + 5 && b[3] > b[1] + 5;
+      /* 依 AI 回報的位置，把案號那一行裁出來；本機找不到那一行（只放了整個上緣）或沒有本機辨識時，用這張取代 */
+      if (top && (!rec.codeImg || rec.codeImgFb)) {
+        const b = j.code_box, ok = Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === "number" && n >= 0 && n <= 1000) && b[2] > b[0] + 5 && b[3] > b[1] + 5 && (b[3] - b[1]) * top.c.width >= 2.2 * (b[2] - b[0]) * top.c.height;
         if (ok) {
-          const x0 = Math.max(0, b[1] / 1000 - 0.02), x1 = Math.min(1, b[3] / 1000 + 0.02), y0 = Math.max(0, b[0] / 1000 - 0.012), y1 = Math.min(1, b[2] / 1000 + 0.012);
+          const x0 = Math.max(0, b[1] / 1000 - 0.03), x1 = Math.min(1, b[3] / 1000 + 0.03);
+          let y0 = b[0] / 1000 - 0.05, y1 = b[2] / 1000 + 0.05;
+          if (y1 - y0 < 0.14) { const m = (y0 + y1) / 2; y0 = m - 0.07; y1 = m + 0.07; }
+          y0 = Math.max(0, y0); y1 = Math.min(1, y1);
           const c = cropC(top.c, x0, y0, x1, y1, Math.min(2, 800 / Math.max(1, top.c.width * (x1 - x0))));
-          rec.codeImg = url(c, 0.9); c.width = c.height = 1;
-        } else rec.codeImg = url(top.c, 0.8);
+          rec.codeImg = url(c, 0.9); rec.codeImgFb = false; c.width = c.height = 1;
+        } else if (!rec.codeImg) rec.codeImg = url(top.c, 0.8);
+      }
+      /* 手寫承辦人：只放大 AI 指出的那一小塊，點圖片可切換成完整右下角 */
+      const sp = shots.find((x) => x.tag === "strip"), wb = j.who_box;
+      if (sp && Array.isArray(wb) && wb.length === 4 && wb.every((n) => typeof n === "number" && n >= 0 && n <= 1000) && wb[2] > wb[0] + 5 && wb[3] > wb[1] + 5) {
+        let x0 = wb[1] / 1000 - 0.06, x1 = wb[3] / 1000 + 0.06, y0 = wb[0] / 1000 - 0.04, y1 = wb[2] / 1000 + 0.04;
+        if (x1 - x0 < 0.6) { const m = (x0 + x1) / 2; x0 = m - 0.3; x1 = m + 0.3; }
+        if (y1 - y0 < 0.12) { const m = (y0 + y1) / 2; y0 = m - 0.06; y1 = m + 0.06; }
+        x0 = Math.max(0, x0); x1 = Math.min(1, x1); y0 = Math.max(0, y0); y1 = Math.min(1, y1);
+        const c = cropC(sp.c, x0, y0, x1, y1, Math.min(2.5, 600 / Math.max(1, sp.c.width * (x1 - x0))));
+        if (c.width > 20 && c.height > 20) { rec.strip = url(c, 0.9); rec.showFull = false; }
+        c.width = c.height = 1;
       }
       return j;
     } finally { shots.forEach((x) => { x.c.width = x.c.height = 1; }); }
@@ -1303,8 +1324,11 @@
     F.code.value = r.code; setImg($("#codeImg"), r.codeImg);
     const stn = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = stn ? stn + "派出所" : "";
     const fl = r.codeFlags || []; $("#fCode").classList.toggle("uncertain", fl.length > 0 || (r.status === "ok" && !r.code) || !!(r.aiFilled && r.aiFilled.code));
-    $("#codeNote").textContent = fl.length ? "請對照上方圖片核對：" + fl.join("、") : r.code ? (r.codeSoft || "已依案號規則校正。") : "";
-    F.who.value = r.who; setImg($("#stripImg"), r.strip); $("#whoHint").value = r.whoHint || "";
+    const nlw = notInList(r.code);
+    $("#codeNote").textContent = (fl.length ? "請對照上方圖片核對：" + fl.join("、") : r.code ? (r.codeSoft || "已依案號規則校正。") : "") + (nlw ? "　⚠ 這個案號不在你貼的案件列表中，請再對照原件確認。" : "");
+    if (nlw) $("#fCode").classList.add("uncertain");
+    F.who.value = r.who; setImg($("#stripImg"), r.showFull && r.stripFull ? r.stripFull : r.strip);
+    { const h = $("#stripHint"), sw = r.stripFull && r.strip !== r.stripFull; h.hidden = !sw; h.textContent = r.showFull ? "目前是完整右下角，點圖片縮回手寫處。" : "已放大到手寫處；點圖片可看完整右下角。"; } $("#whoHint").value = r.whoHint || "";
     F.date.value = r.date; setImg($("#dateImg"), r.dateImg);
     $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || (r.nameDate && r.date === r.nameDate ? "取自檔名" : "");
     $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
@@ -1348,7 +1372,11 @@
     r.touched.who = false; $("#aiPage").click();
   });
   $("#whoHint").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#whoHintBtn").click(); } });
-  $("#stripImg").addEventListener("click", (e) => { const s = e.target.style; const big = s.maxHeight === "900px"; s.maxHeight = big ? "" : "900px"; s.cursor = big ? "zoom-in" : "zoom-out"; });
+  $("#stripImg").addEventListener("click", (e) => {
+    const rr = pages[cur];
+    if (rr && rr.stripFull && rr.strip !== rr.stripFull) { rr.showFull = !rr.showFull; renderForm(); return; }
+    const s = e.target.style; const big = s.maxHeight === "900px"; s.maxHeight = big ? "" : "900px"; s.cursor = big ? "zoom-in" : "zoom-out";
+  });
   bind("date", (r) => { r.dateFlag = ""; $("#fDate").classList.remove("uncertain"); $("#dateNote").textContent = ""; });
   bind("caseNo", (r) => { r.caseNo = F.caseNo.value.trim(); });
   bind("occNo", (r) => { r.occNo = F.occNo.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
@@ -1377,18 +1405,19 @@
   }
   function renderTable() {
     const tb = $("#tbl tbody"); if (!tb) return;
-    let miss = 0;
+    let miss = 0, lnMiss = 0;
     tb.innerHTML = pages.map((r, i) => {
       const v = derive(r), cap = r.type === "cap" || r.type === "xfer";
       const need = [!v[0], !v[1], false, false, !v[4], cap && !v[5], cap && !v[6], !v[7]];
       const mm = r.skip ? 0 : need.filter(Boolean).length; miss += mm;
-      const td = (j, t) => '<td class="' + (!r.skip && need[j] ? "miss" : "") + '">' + (esc(t || "") || (!r.skip && need[j] ? "缺" : "")) + "</td>";
+      const nl = !r.skip && notInList(v[1]); if (nl) lnMiss++;
+      const td = (j, t) => '<td class="' + (!r.skip && need[j] ? "miss" : "") + (j === 1 && nl ? " nolist" : "") + '"' + (j === 1 && nl ? ' title="這個案號不在你貼的案件列表中"' : "") + '>' + (esc(t || "") || (!r.skip && need[j] ? "缺" : "")) + (j === 1 && nl ? " ⚠不在列表" : "") + "</td>";
       const unc = (r.codeFlags && r.codeFlags.length) || r.dateFlag || r.docFlag || r.catFlag || r.aiFlag;
       return '<tr data-i="' + i + '" class="' + (i === cur ? "cur " : "") + (r.skip ? "skip" : "") + '"><td>' + (i + 1) + "</td><td>" + esc(r.src) + (r.status === "ok" ? "" : r.status === "busy" ? "（辨識中）" : r.status === "err" ? "（失敗）" : "（等待）") + (unc ? " ⚠" : "") + "</td><td>" + (r.type === "xfer" ? "移轉" : cap ? "破獲" : "發生") + "</td>" +
         td(0, v[0]) + td(1, v[1]) + td(2, v[2]) + td(3, v[3]) + td(4, v[4]) + td(5, v[5]) + td(6, v[6]) + td(7, v[7]) + "</tr>";
     }).join("");
     const unc = pages.filter(isUnc).length;
-    $("#tblHint").textContent = pages.length ? (miss ? "還有 " + miss + " 個必填欄位是空的（紅字「缺」）。" : "必填欄位都已填寫。") + (unc ? " ⚠ 表示有 " + unc + " 頁的案號、日期或文號是自動猜的，建議逐頁核對。" : "") : "";
+    $("#tblHint").textContent = pages.length ? (miss ? "還有 " + miss + " 個必填欄位是空的（紅字「缺」）。" : "必填欄位都已填寫。") + (unc ? " ⚠ 表示有 " + unc + " 頁的案號、日期或文號是自動猜的，建議逐頁核對。" : "") + (lnMiss ? " 有 " + lnMiss + " 筆案號不在你貼的案件列表中（標「⚠不在列表」），可能是讀錯，也可能那件本來就不在列表上，請對照原件確認；案號不會被自動更動。" : "") : "";
     const rr = tb.querySelector("tr.cur"), box = rr && rr.closest(".tw");
     if (box) { const top = rr.offsetTop - 28, bot = rr.offsetTop + rr.offsetHeight; if (top < box.scrollTop) box.scrollTop = top; else if (bot > box.scrollTop + box.clientHeight) box.scrollTop = bot - box.clientHeight + 4; }
   }
@@ -1677,7 +1706,15 @@
     else if (only && !shown) h += '<p class="hint">這一邊沒有重複的列。</p>';
     box.innerHTML = h;
   }
-  function refresh() { readOpts(); compute(); summary(); renderSide("a"); renderSide("b"); infoLines(); }
+  let listSig = "";
+  function syncList() {
+    const S = side.b, ok = S.rows.length && dataRows("b") && !S.noId;
+    const sig = ok ? [S.rows.length, S.col, S.header, opt.space, opt.width, opt.sym].join("|") : "";
+    if (sig === listSig) return; listSig = sig;
+    if (ok) { const set = new Set(); buildMap(S).forEach((v, key) => set.add(key)); listCodes = { has: (c) => set.has(norm(c)), n: set.size }; } else listCodes = null;
+    renderTable(); if (pages[cur]) renderForm();
+  }
+  function refresh() { readOpts(); compute(); summary(); renderSide("a"); renderSide("b"); infoLines(); syncList(); }
   function infoLines() {
     ["a", "b"].forEach((k) => {
       const S = side[k], w = S.rows.length ? S.rows[0].length : 0;
