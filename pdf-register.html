@@ -226,6 +226,17 @@
         <button id="aiFixClear" type="button">清除已記住的更正</button>
       </div>
       <p class="hint" id="aiInfo"></p>
+      <div class="box" id="aiUseBox" style="margin-top:10px;padding:10px 12px">
+        <strong style="font-size:.9rem">API 用量（只記錄這個瀏覽器送出的請求）</strong>
+        <div id="aiUse" style="margin-top:4px"></div>
+        <div id="aiEst" class="hint"></div>
+        <details><summary>最近 7 天</summary><div id="aiHist" class="hint" style="white-space:pre-line"></div></details>
+        <div class="row" style="margin-top:8px">
+          <label class="f" style="margin:0;flex-direction:row;align-items:center;gap:8px">每日請求上限（選填；到 AI Studio 的「Rate limit」頁查這個模型的每日請求數）<input id="aiRpd" type="text" inputmode="numeric" spellcheck="false" style="width:90px" placeholder="例如 1000"></label>
+          <button id="aiUseClear" type="button">清除用量紀錄</button>
+        </div>
+        <p class="hint">用量是每次 Google 回傳的 token 數累加起來的，以太平洋時間的日期歸檔（和免費額度的重置時間一致）。同一把金鑰如果在別台電腦或別的程式也有使用，這裡看不到，實際剩餘請以 AI Studio 的 Usage 頁面為準。</p>
+      </div>
     </div>
     <p class="hint">AI 讀到的內容只會填在沒有被你手動改過的欄位，並標成 ⚠ 請你核對；承辦人一律對照名單，名單裡找不到的不會填。你手動更正承辦人後，按「複製」或下載時會記住「AI 讀到的字 → 正確名字」，下次遇到同樣的字就直接套用（單字也會記；只存在這台電腦的瀏覽器）。</p>
   </section>
@@ -857,7 +868,7 @@
   const DESTS_L = DESTS.slice().sort((a, b) => b.length - a.length), tn = (t) => String(t).replace(/臺/g, "台");
   const destFind = (t) => DESTS_L.find((x) => tn(t).includes(tn(x))) || "";   /* 「南投信義」要比「信義」優先；臺／台視為相同 */
   { const dl = $("#destList"); if (dl) dl.innerHTML = DESTS.map((d) => '<option value="' + d + '">').join(""); }   /* 轉往分局的輸入提示 */
-  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", rpm: 5, only: false };
+  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", rpm: 5, only: false, rpd: 0 };
   const aiStat = { ok: 0, err: 0, tok: 0 };
   let aiLast = 0, aiStop = false, aiBusy = false, aiFatal = "";
   const aiReady = () => AI.on && AI.key.length > 10 && !aiFatal;
@@ -881,8 +892,32 @@
     } catch (e) {}
   }
   function aiVis() { const on = aiReady(); $("#aiPage").hidden = !on; $("#aiTxtBox").hidden = !on; $("#hintRow").hidden = !on; }
+  /* ---- API 用量：每次回應的 usageMetadata 累加，按太平洋時間的日期存在這個瀏覽器 ---- */
+  const KEY_USE = "pdf-register-usage";
+  const ptDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
+  const useLoad = () => { try { const o = JSON.parse(lsGet(KEY_USE) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } };
+  function useAdd(ok, js) {
+    try {
+      const u = useLoad(), k = ptDay(), t = u[k] || (u[k] = { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }), m = AI.model;
+      const md = (js && js.usageMetadata) || {}, inp = md.promptTokenCount || 0, tot = md.totalTokenCount || 0, out = Math.max(0, tot - inp);
+      if (ok) { t.ok++; t.inp += inp; t.out += out; t.tot += tot; } else t.err++;
+      const mm = t.m[m] || (t.m[m] = { ok: 0, tot: 0 }); if (ok) { mm.ok++; mm.tot += tot; }
+      Object.keys(u).sort().slice(0, Math.max(0, Object.keys(u).length - 14)).forEach((x) => delete u[x]);
+      lsSet(KEY_USE, JSON.stringify(u));
+    } catch (e) {}
+  }
+  function useUi() {
+    const el = $("#aiUse"); if (!el) return;
+    const u = useLoad(), k = ptDay(), t = u[k] || { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }, lim = +AI.rpd > 0 ? +AI.rpd : 0, nf = (n) => Number(n).toLocaleString();
+    el.textContent = "今天（太平洋時間 " + k + "，台灣約隔天下午 3～4 點重置）：成功 " + t.ok + " 次、失敗 " + t.err + " 次；共約 " + nf(t.tot) + " tokens（輸入 " + nf(t.inp) + "、輸出與思考 " + nf(t.out) + "）" + (lim ? "。每日上限 " + lim + " 次，約剩 " + Math.max(0, lim - t.ok - t.err) + " 次" : "");
+    const days = Object.keys(u).sort().reverse().slice(0, 7);
+    $("#aiHist").textContent = days.length ? days.map((d) => d + "　成功 " + u[d].ok + "、失敗 " + u[d].err + "、" + nf(u[d].tot) + " tokens　" + Object.keys(u[d].m || {}).map((x) => x + "×" + u[d].m[x].ok).join("、")).join("\n") : "還沒有紀錄。";
+    const ok7 = days.reduce((s, d) => s + u[d].ok, 0), tok7 = days.reduce((s, d) => s + u[d].tot, 0), avg = ok7 ? Math.round(tok7 / ok7) : 0;
+    const n = (typeof pages !== "undefined" ? pages : []).filter((r) => !r.aiDone && !r.skip).length, left = lim ? lim - t.ok - t.err : null;
+    $("#aiEst").textContent = !n ? "" : "這批還有 " + n + " 頁沒用 AI 讀：預計送出約 " + n + " 次請求" + (avg ? "、約 " + nf(n * avg) + " tokens（以近 7 天每次平均 " + nf(avg) + " 計）" : "") + "，依每分鐘 " + AI.rpm + " 次至少約需 " + Math.ceil(n / Math.max(1, AI.rpm)) + " 分鐘。" + (left == null ? "" : n > left ? "⚠ 超過今天剩下的約 " + Math.max(0, left) + " 次，可能讀不完；可以改用「只用本機辨識」或分到明天。" : "今天的額度夠用。");
+  }
   function aiUi() {
-    aiVis();
+    aiVis(); useUi();
     const el = $("#aiInfo"); if (!el) return;
     el.textContent = aiFatal ? "AI 已暫停：" + aiFatal + "（修改設定或按「測試連線」可重新啟用）"
       : (aiStat.ok || aiStat.err) ? "AI 已讀 " + aiStat.ok + " 次，失敗 " + aiStat.err + " 次，累計約 " + aiStat.tok.toLocaleString() + " tokens。"
@@ -892,16 +927,16 @@
   function aiSave() {
     AI.on = $("#aiOn").checked; AI.key = $("#aiKey").value.trim();
     AI.model = ($("#aiModel").value.trim() || "gemini-3.5-flash-lite").replace(/^models\//, "");
-    const n = parseInt($("#aiRpm").value, 10); AI.rpm = n > 0 ? Math.min(n, 300) : 5; AI.only = $("#aiOnly").checked;
+    const n = parseInt($("#aiRpm").value, 10); AI.rpm = n > 0 ? Math.min(n, 300) : 5; AI.only = $("#aiOnly").checked; AI.rpd = Math.max(0, parseInt($("#aiRpd").value, 10) || 0);
     aiFatal = ""; lsSet(KEY_AI, JSON.stringify(AI)); $("#aiOpts").hidden = !AI.on; aiUi();
   }
   function aiLoad() {
     try { const s = JSON.parse(lsGet(KEY_AI) || "null"); if (s && typeof s === "object") Object.assign(AI, s); } catch (e) {}
     AI.key = String(AI.key || ""); AI.model = String(AI.model || "gemini-3.5-flash-lite").replace(/^models\//, ""); AI.rpm = +AI.rpm > 0 ? +AI.rpm : 5;
-    $("#aiOn").checked = !!AI.on; $("#aiKey").value = AI.key; $("#aiModel").value = AI.model; $("#aiRpm").value = AI.rpm; $("#aiOnly").checked = !!AI.only;
+    $("#aiOn").checked = !!AI.on; $("#aiKey").value = AI.key; $("#aiModel").value = AI.model; $("#aiRpm").value = AI.rpm; $("#aiOnly").checked = !!AI.only; $("#aiRpd").value = AI.rpd > 0 ? AI.rpd : "";
     $("#aiOpts").hidden = !AI.on; aiUi();
   }
-  ["aiKey", "aiModel", "aiRpm"].forEach((id) => $("#" + id).addEventListener("input", aiSave));
+  ["aiKey", "aiModel", "aiRpm", "aiRpd"].forEach((id) => $("#" + id).addEventListener("input", aiSave));
   ["aiOn", "aiOnly"].forEach((id) => $("#" + id).addEventListener("change", aiSave));
 
   /* 限速：兩次送出之間至少隔 60 秒 / 每分鐘頁數；等待時可以按停止 */
@@ -952,7 +987,8 @@
         throw new Error(e && e.name === "AbortError" ? "AI 回應逾時" : "無法連線到 Google（" + (e && e.message ? e.message : e) + "），請檢查網路，或網路是否擋住 generativelanguage.googleapis.com");
       }
       clearTimeout(to);
-      if (res.ok) return js;
+      if (res.ok) { useAdd(true, js); return js; }
+      useAdd(false, null);
       const er = js.error || {}, code = res.status;
       if (code === 429 && !aiDaily(er) && !aiZero(er) && a < 5) { const s = retrySec(er); await waitMsg(((s != null ? s : 20) + 2) * 1000, "達到每分鐘上限，等待"); continue; }
       if ((code === 500 || code === 503 || code === 504) && a < 3) { await waitMsg(8000 * (a + 1), "Google 伺服器忙碌，重試"); continue; }
@@ -1170,6 +1206,7 @@
   }
   $("#aiAll").addEventListener("click", aiAllRun);
   $("#aiStop").addEventListener("click", () => { aiStop = true; });
+  $("#aiUseClear").addEventListener("click", () => { lsSet(KEY_USE, "{}"); useUi(); });
   $("#aiClear").addEventListener("click", () => { $("#aiKey").value = ""; aiSave(); });
   $("#aiFixClear").addEventListener("click", () => { const n = Object.keys(fixLoad()).length; lsSet(KEY_FIX, "{}"); $("#aiInfo").textContent = "已清除記住的更正（原有 " + n + " 筆）。"; });
   /* 從文字檔載入金鑰：只讀檔案第一個非空白行，不顯示內容，載入後照原流程存進這台瀏覽器 */
@@ -1277,7 +1314,7 @@
         for (let n = 1; n <= doc.numPages; n++) pages.push(mkRec(fi, n, f.name));
       } catch (e) { show("「" + f.name + "」無法開啟，可能已加密或損毀。", "err"); }
     }
-    $("#fileInfo").textContent = "已加入 " + pages.length + " 頁";
+    $("#fileInfo").textContent = "已加入 " + pages.length + " 頁"; aiUi();
     { const first = $("#work").hidden; $("#work").hidden = false; $("#tblBox").hidden = false; if (first) $("#work").scrollIntoView({ block: "start" }); }
     renderTable(); runAll();
   }
