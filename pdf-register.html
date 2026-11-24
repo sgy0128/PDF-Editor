@@ -115,10 +115,10 @@
   #dropOv b { padding: 16px 28px; border-radius: 12px; background: var(--panel); color: var(--accent); font-size: 1.3rem; box-shadow: 0 8px 28px rgba(0,0,0,.25); }
 
   /* ===== 核對版面：整頁圖、表單、案件清冊一次看到，各自在框內捲動，不會牽動整個視窗 ===== */
-  main { max-width: 1800px; }
+  main { max-width: 2600px; padding-left: 12px; padding-right: 12px; }
   .work { grid-template-columns: minmax(0, 1fr) 430px minmax(0, 1.05fr); height: calc(100vh - 24px); min-height: 560px; align-items: stretch; }
   .viewer { position: static; height: 100%; }
-  #panel { height: 100%; overflow: auto; overscroll-behavior: contain; padding-top: 0; }
+  #panel { height: 100%; overflow: auto; padding-top: 0; }
   #panel .nav { position: sticky; top: 0; z-index: 3; background: var(--panel); padding: 10px 0 8px; margin: 0 0 4px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   #panel .nav .pg { flex: 1 1 100%; order: -1; }
   #panel .nav button { padding: 5px 9px; font-size: .85rem; }
@@ -785,7 +785,24 @@
   function prevDate(rec) { const i = pages.indexOf(rec); for (let k = i - 1; k >= 0; k--) if (pages[k].date) return pages[k].date; return ""; }
 
   /* ================= AI（Google Gemini）輔助 ================= */
-  const KEY_AI = "pdf-register-ai", DESTS = ["中和", "板橋", "新莊", "三峽", "樹林", "永和"];
+  const KEY_AI = "pdf-register-ai", DESTS = [
+    "中和", "板橋", "新莊", "三峽", "樹林", "永和", "中壢", "桃園", "三重", "新店", "蘆洲", "海山",
+    "中市六", "屏東", "永康", "中山", "萬華", "中市五", "大安", "鳳山", "彰化", "淡水", "土城", "八德",
+    "中市三", "清水", "中市二", "平鎮", "龜山", "三民二", "信義", "內湖", "士林", "霧峰", "林口", "仁武",
+    "楊梅", "岡山", "豐原", "苓雅", "大園", "楠梓", "汐止", "林園", "大雅", "竹北", "蘆竹", "烏日",
+    "前鎮", "中市四", "中市一", "員林", "南市一", "松山", "北投", "歸仁", "苗栗", "大同", "太平", "竹市二",
+    "嘉市一", "南市三", "左營", "斗六", "羅東", "南市五", "新湖", "台東", "竹市一", "新興", "花蓮", "鹿港",
+    "頭份", "宜蘭", "竹市三", "竹南", "大甲", "鼓山", "南市二", "民雄", "善化", "小港", "東港", "基市四",
+    "虎尾", "中正一", "湖內", "新營", "竹東", "基市二", "龍潭", "南港", "吉安", "和美", "南投", "三民一",
+    "大溪", "南市六", "內埔", "麻豆", "嘉市二", "文山二", "文山一", "北斗", "埔里", "溪湖", "中正二", "潮州",
+    "基市三", "里港", "礁溪", "芳苑", "草屯", "斗南", "水上", "基市一", "南市四", "臺西", "佳里", "田中",
+    "旗山", "西螺", "北港", "朴子", "馬公", "東勢", "新埔", "通霄", "竹山", "恆春", "瑞芳", "枋寮",
+    "白河", "中埔", "新城", "新化", "蘇澳", "金山", "竹崎", "鳳林", "金城", "橫山", "學甲", "集集",
+    "大湖", "關山", "鹽埕", "玉里", "三星", "金湖", "玉井", "布袋", "大武", "成功", "中興", "六龜",
+    "仁愛", "和平", "南投信義", "白沙", "望安"];
+  const DESTS_L = DESTS.slice().sort((a, b) => b.length - a.length), tn = (t) => String(t).replace(/臺/g, "台");
+  const destFind = (t) => DESTS_L.find((x) => tn(t).includes(tn(x))) || "";   /* 「南投信義」要比「信義」優先；臺／台視為相同 */
+  { const dl = $("#destList"); if (dl) dl.innerHTML = DESTS.map((d) => '<option value="' + d + '">').join(""); }   /* 轉往分局的輸入提示 */
   const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", rpm: 5, only: false };
   const aiStat = { ok: 0, err: 0, tok: 0 };
   let aiLast = 0, aiStop = false, aiBusy = false, aiFatal = "";
@@ -921,7 +938,7 @@
       list.map((x, i) => "圖" + (i + 1) + "＝" + x.label).join("\n") +
       (hint ? "\n\n【使用者提示】使用者已親自看過「右下邊緣」那張圖上手寫承辦人的地方，確認寫的字是「" + hint + "」。請以此為準：who_raw 就填「" + hint + "」，並從名單中選出名字含有這些字、最符合的人；若名單裡有多位都符合，who 回空字串，改在 who_candidates 列出可能的人。其他欄位照常自己判斷。" : "") +
       "\n\n請讀出下列欄位，只回傳一個 JSON 物件，不要任何其他文字。看不清楚或沒有的欄位回空字串，不要猜、不要編造。\n{\n" +
-      ' "type": "occ、cap、xfer 其中之一，看不出來回空字串。occ＝標題為「陳報單」（發生案件）；cap＝標題為「刑案呈報單」（破獲案件，有嫌疑人）；xfer＝右下邊緣手寫處寫的不是人名，而是轉往的分局名稱（' + DESTS.join("、") + '）",\n' +
+      ' "type": "occ、cap、xfer 其中之一，看不出來回空字串。occ＝標題為「陳報單」（發生案件）；cap＝標題為「刑案呈報單」（破獲案件，有嫌疑人）；xfer＝右下邊緣手寫處寫的不是人名，而是轉往的分局名稱（請從文末的「分局名單」選）",\n' +
       ' "station_name": "標題或「查獲地點」裡的「○○派出所／分隊」，只回兩個字，例如 土城、廣福、清水、金城、頂埔、交通",\n' +
       ' "code": "E化案號，共 15 碼英數字，位於頁面上緣。格式：Z + 民國年3碼 + 月份2碼 + 9 + AD1 + 派出所代號2碼（O1、P1、Q1、M1、R1 或 91）+ 末3碼（全是數字）。請逐字照抄，字母 O 與數字 0、字母 I 與數字 1 請依這個格式判斷",\n' +
       ' "code_box": "E化案號那一行字在「頁面上緣右側」那張圖裡的位置，格式 [ymin, xmin, ymax, xmax]，座標是 0 到 1000 的整數；看不到回空陣列",\n' +
@@ -932,10 +949,12 @@
       ' "sticky_who": "便條紙上寫的實際承辦人，同樣從名單選出全名；沒有便條紙回空字串",\n' +
       ' "sticky_who_raw": "便條紙上實際看到的字，照抄",\n' +
       ' "sticky_candidates": [],\n' +
+      ' "sticky_transfer": "便條紙上若寫著要「移轉」給某分局（例如「移轉○○分局」），只回分局名稱、不含「分局」二字（例如「板橋」），優先從文末的「分局名單」選；名單裡沒有的分局就照抄你看到的字；沒有這類字樣回空字串。這種情況下 sticky_who 請回空字串（分局名稱不是人名）",\n' +
       ' "cat": "只有 cap 或 xfer 才填：單子上「觸犯法條」那一列的文字，逐字照抄，不要增減",\n' +
       ' "doc_no": "收文條碼下方的數字。格式：民國年3碼（11 開頭）+ 7 碼流水號，共 10 位數字",\n' +
       ' "date": "收文貼紙上的日期，民國年/月/日，例如 115/11/17",\n' +
-      ' "note": "哪個欄位看不清楚、哪裡讓你不確定，簡短說明；沒有就空字串"\n}';
+      ' "note": "哪個欄位看不清楚、哪裡讓你不確定，簡短說明；沒有就空字串"\n}' +
+      "\n\n分局名單：" + DESTS.join("、") + "\n名單簡稱說明：「中市」＝臺中市、「南市」＝臺南市、「竹市」＝新竹市、「嘉市」＝嘉義市、「基市」＝基隆市，後面的數字是第幾分局（例如「中市六」＝臺中市第六分局）；「三民一」「三民二」＝高雄市三民第一、第二分局；「中正一」「中正二」「文山一」「文山二」＝臺北市的分局；「南投信義」＝南投縣信義分局，「信義」＝臺北市信義分局。";
   }
   async function aiRead(rec, full, st, bt) {
     const shots = aiShots(full, st, bt);
@@ -976,8 +995,11 @@
     rec.aiMiss = ""; rec.aiMissS = ""; rec.aiErr = "";
     const ty = aiS(j.type), wRaw = aiS(j.who_raw), wAll = aiS(j.who) + wRaw;
     rec.aiWhoRaw = wRaw; rec.aiWho = aiS(j.who);
+    const sTr = aiS(j.sticky_transfer).replace(/移轉|轉往|轉至|警察局|分局/g, "").replace(/[\s「」"'“”○]/g, "").slice(0, 8);   /* 便條紙寫「移轉○○分局」 */
+    const sTrD = destFind(sTr) || (/^[\u4e00-\u9fff]{2,8}$/.test(sTr) ? sTr : "");
     if (!T.type) {
-      if (ty === "occ" || ty === "cap") rec.type = ty;
+      if (sTrD) rec.type = "xfer";
+      else if (ty === "occ" || ty === "cap") rec.type = ty;
       else if (ty === "xfer" && DESTS.some((d) => wAll.includes(d))) rec.type = "xfer";
     }
     const capLike = rec.type === "cap" || rec.type === "xfer";
@@ -1001,7 +1023,7 @@
     /* 承辦人 */
     if (rec.type === "xfer") {
       if (!T.who) {
-        const d = DESTS.find((x) => wAll.includes(x));
+        const d = sTrD || destFind(wAll);
         if (d) { rec.who = d; fill.who = true; done.push("轉往分局"); }
         else if (wRaw) rec.aiMiss = "AI 讀到「" + wRaw + "」，不是已知的分局，請自己輸入。";
       }
@@ -1033,7 +1055,7 @@
     }
     const ad = parseDate(aiS(j.date));
     if (ad && !T.date && !rec.nameDate && !rec.ocrDate) rec.ocrDate = ad;
-    const note = aiS(j.note).slice(0, 80);
+    const note = (aiS(j.note) + (sTrD && !DESTS.includes(sTrD) ? "　便條紙的分局「" + sTrD + "」不在已知名單，請對照圖片確認" : "")).slice(0, 120);
     rec.aiFlag = done.length ? "AI 已填入：" + done.join("、") + "，請核對" + (note ? "（" + note + "）" : "")
       : (rec.aiMiss || rec.aiMissS) ? "AI 無法確定承辦人，請核對" : note ? "AI 備註：" + note : "";
     rec.aiDone = true;
@@ -1360,6 +1382,30 @@
       const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "登記"); XLSX.writeFile(wb, "陳報單登記.xlsx");
     } catch (e) { show("無法產生 Excel（" + (e && e.message ? e.message : e) + "），請改用「複製」或「下載 CSV」。", "warn"); }
   });
+})();
+</script>
+<script>
+/* 小區域（整頁圖、表單、清冊、文字框）已經捲到頂或底時，繼續滾動就改為捲動整個頁面 */
+(function () {
+  function room(el, dy) {   /* null＝不是會捲動的區域；true＝往這個方向還能捲；false＝已到盡頭 */
+    if (el.scrollHeight <= el.clientHeight + 1) return null;
+    const oy = getComputedStyle(el).overflowY;
+    if (oy !== "auto" && oy !== "scroll") return null;
+    return dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+  }
+  document.addEventListener("wheel", function (e) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || !e.deltaY || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+    let exhausted = false;
+    for (let el = e.target; el && el.nodeType === 1 && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      const r = room(el, e.deltaY);
+      if (r === true) return;
+      if (r === false) exhausted = true;
+    }
+    if (!exhausted) return;
+    e.preventDefault();
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
+    window.scrollBy({ top: e.deltaY * k, left: 0, behavior: "instant" });
+  }, { passive: false });
 })();
 </script>
 <script>
