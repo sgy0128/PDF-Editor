@@ -188,10 +188,11 @@
         <button id="aiAll" type="button">用 AI 讀取所有尚未讀取的頁面</button>
         <button id="aiStop" type="button" hidden>停止 AI</button>
         <button id="aiClear" type="button">清除已存的金鑰</button>
+        <button id="aiFixClear" type="button">清除已記住的更正</button>
       </div>
       <p class="hint" id="aiInfo"></p>
     </div>
-    <p class="hint">AI 讀到的內容只會填在沒有被你手動改過的欄位，並標成 ⚠ 請你核對；承辦人一律對照名單，名單裡找不到的不會填。</p>
+    <p class="hint">AI 讀到的內容只會填在沒有被你手動改過的欄位，並標成 ⚠ 請你核對；承辦人一律對照名單，名單裡找不到的不會填。你手動更正承辦人後，按「複製」或下載時會記住「AI 讀到的字 → 正確名字」，下次遇到同樣的字就直接套用（只記 2 個字以上的字跡，只存在這台電腦的瀏覽器）。</p>
   </section>
 
   <section class="box">
@@ -241,6 +242,10 @@
         <input id="who" type="text" spellcheck="false" autocomplete="off" placeholder="輸入名字裡的一個字，按 Enter 選取；再按 Enter 到下一頁">
         <div class="chips" id="whoChips"></div><datalist id="destList"><option value="中和"><option value="板橋"><option value="新莊"><option value="三峽"><option value="樹林"><option value="永和"></datalist>
         <div class="note" id="whoNote"></div>
+        <div class="row" id="hintRow" style="margin-top:6px" hidden>
+          <input id="whoHint" type="text" spellcheck="false" autocomplete="off" maxlength="20" placeholder="我看這個字是…（例如：永）" style="flex:1 1 160px;width:auto">
+          <button id="whoHintBtn" type="button" title="把你看出來的字告訴 AI，只重讀這一頁">告訴 AI 並重讀此頁</button>
+        </div>
       </div>
 
       <div class="two">
@@ -787,7 +792,24 @@
   const aiReady = () => AI.on && AI.key.length > 10 && !aiFatal;
   const aiS = (v) => (v == null ? "" : String(v)).trim();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  function aiVis() { const on = aiReady(); $("#aiPage").hidden = !on; $("#aiTxtBox").hidden = !on; }
+  /* 記住你的更正：AI 讀到的手寫字 → 你改成的名字（只存在這台瀏覽器；只記 2 個字以上，避免單字對應到不同人） */
+  const KEY_FIX = "pdf-register-fixes";
+  const fixNorm = (t) => aiS(t).replace(/\s+/g, "");
+  function fixLoad() { try { const o = JSON.parse(lsGet(KEY_FIX) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } }
+  function learnFixes() {
+    try {
+      const f = fixLoad(); let n = 0;
+      const add = (raw, name) => { raw = fixNorm(raw); if (raw.length < 2 || !roster.includes(name) || f[raw] === name) return; delete f[raw]; f[raw] = name; n++; };
+      pages.forEach((r) => {
+        if (r.skip || r.type === "xfer") return;
+        if (r.touched.who && r.aiWhoRaw && r.who !== r.aiWho) add(r.aiWhoRaw, r.who);
+        if (r.sticky && r.touched.realWho && r.aiSRaw && r.realWho !== r.aiSWho) add(r.aiSRaw, r.realWho);
+      });
+      const ks = Object.keys(f); ks.slice(0, Math.max(0, ks.length - 200)).forEach((k) => delete f[k]);
+      if (n) lsSet(KEY_FIX, JSON.stringify(f));
+    } catch (e) {}
+  }
+  function aiVis() { const on = aiReady(); $("#aiPage").hidden = !on; $("#aiTxtBox").hidden = !on; $("#hintRow").hidden = !on; }
   function aiUi() {
     aiVis();
     const el = $("#aiInfo"); if (!el) return;
@@ -894,9 +916,10 @@
     if (bt && bt.date) L.push({ tag: "date", label: "收文貼紙上的日期", c: aiShotPx(full, bt.date, 1200) });
     return L;
   }
-  function aiPrompt(list) {
+  function aiPrompt(list, hint) {
     return "你是台灣派出所公文登記的助手。下面是同一頁掃描的「陳報單」或「刑案呈報單」，依序附上幾張圖：\n" +
       list.map((x, i) => "圖" + (i + 1) + "＝" + x.label).join("\n") +
+      (hint ? "\n\n【使用者提示】使用者已親自看過「右下邊緣」那張圖上手寫承辦人的地方，確認寫的字是「" + hint + "」。請以此為準：who_raw 就填「" + hint + "」，並從名單中選出名字含有這些字、最符合的人；若名單裡有多位都符合，who 回空字串，改在 who_candidates 列出可能的人。其他欄位照常自己判斷。" : "") +
       "\n\n請讀出下列欄位，只回傳一個 JSON 物件，不要任何其他文字。看不清楚或沒有的欄位回空字串，不要猜、不要編造。\n{\n" +
       ' "type": "occ、cap、xfer 其中之一，看不出來回空字串。occ＝標題為「陳報單」（發生案件）；cap＝標題為「刑案呈報單」（破獲案件，有嫌疑人）；xfer＝右下邊緣手寫處寫的不是人名，而是轉往的分局名稱（' + DESTS.join("、") + '）",\n' +
       ' "station_name": "標題或「查獲地點」裡的「○○派出所／分隊」，只回兩個字，例如 土城、廣福、清水、金城、頂埔、交通",\n' +
@@ -917,7 +940,7 @@
   async function aiRead(rec, full, st, bt) {
     const shots = aiShots(full, st, bt);
     try {
-      const parts = [{ text: aiPrompt(shots) }];
+      const parts = [{ text: aiPrompt(shots, rec.whoHint) }];
       shots.forEach((x, i) => { parts.push({ text: "圖" + (i + 1) + "：" + x.label }); parts.push({ inline_data: { mime_type: "image/jpeg", data: url(x.c, 0.85).split(",")[1] } }); });
       const js = await callGemini(parts);
       aiStat.tok += (js.usageMetadata && js.usageMetadata.totalTokenCount) || 0;
@@ -938,6 +961,8 @@
 
   /* 承辦人：優先採 AI 回的全名；不在名單就用手寫字、候選去對名單，只有唯一符合才填 */
   function rosterPick(pick, raw, cand) {
+    const fx = fixLoad()[fixNorm(raw)];
+    if (typeof fx === "string" && roster.includes(fx)) return { name: fx, maybe: [], learned: true };
     const p = aiS(pick);
     if (roster.includes(p)) return { name: p, maybe: [] };
     const pool = [], add = (n) => { if (roster.includes(n) && !pool.includes(n)) pool.push(n); };
@@ -950,6 +975,7 @@
     const T = rec.touched, fill = (rec.aiFilled = {}), done = [];
     rec.aiMiss = ""; rec.aiMissS = ""; rec.aiErr = "";
     const ty = aiS(j.type), wRaw = aiS(j.who_raw), wAll = aiS(j.who) + wRaw;
+    rec.aiWhoRaw = wRaw; rec.aiWho = aiS(j.who);
     if (!T.type) {
       if (ty === "occ" || ty === "cap") rec.type = ty;
       else if (ty === "xfer" && DESTS.some((d) => wAll.includes(d))) rec.type = "xfer";
@@ -964,9 +990,8 @@
       if (stn && cand[10] !== stn) { const old = cand[10]; cand = cand.slice(0, 10) + stn + cand.slice(11); soft = "派出所代號依單子標題由 " + old + " 改成 " + stn + "。" + (soft ? " " + soft : ""); }
       if (!(had && had === cand)) {
         if (had) {
-          const lf = rec.codeFlags || []; let other = had;
-          if (flags.length > lf.length) { other = cand; cand = had; flags = lf.slice(); soft = rec.codeSoft || ""; fromAi = false; }
-          flags.push("AI 與本機辨識的結果不同（另一個是 " + other + "）");
+          /* 預設以 AI 為準：和本機辨識不同時一律採用 AI，本機讀到的列在提醒裡供核對 */
+          flags.push("AI 與本機辨識的結果不同（本機讀到 " + had + "）");
         }
         rec.code = cand; rec.codeFlags = flags;
         rec.codeSoft = fromAi ? "AI 讀取，請核對。" + (soft ? " " + soft : "") : soft;
@@ -982,15 +1007,16 @@
       }
     } else if (!T.who) {
       const p = rosterPick(j.who, wRaw, j.who_candidates);
-      if (p.name) { rec.who = p.name; fill.who = true; done.push("承辦人"); }
+      if (p.name) { rec.who = p.name; fill.who = true; done.push(p.learned ? "承辦人（套用你之前的更正）" : "承辦人"); }
       else rec.aiMiss = p.maybe.length ? "AI 認為可能是：" + p.maybe.join("、") + "（請對照圖片）" : wRaw ? "AI 讀到「" + wRaw + "」，但名單裡找不到。" : "";
     }
     /* 便條紙與實際承辦人 */
     const sWho = aiS(j.sticky_who), sRaw = aiS(j.sticky_who_raw);
+    rec.aiSRaw = sRaw; rec.aiSWho = sWho;
     if (!T.sticky && (j.has_sticky === true || j.has_sticky === "true" || sWho) && !rec.sticky) rec.sticky = true;
     if (rec.sticky && !T.realWho && (sWho || sRaw)) {
       const p = rosterPick(sWho, sRaw, j.sticky_candidates);
-      if (p.name) { rec.realWho = p.name; fill.realWho = true; done.push("實際承辦人"); }
+      if (p.name) { rec.realWho = p.name; fill.realWho = true; done.push(p.learned ? "實際承辦人（套用你之前的更正）" : "實際承辦人"); }
       else rec.aiMissS = p.maybe.length ? "便條紙：AI 認為可能是 " + p.maybe.join("、") + "（請對照圖片）" : "便條紙：AI 讀到「" + sRaw + "」，但名單裡找不到。";
     }
     /* 案類、文號、日期 */
@@ -1053,6 +1079,7 @@
   $("#aiAll").addEventListener("click", aiAllRun);
   $("#aiStop").addEventListener("click", () => { aiStop = true; });
   $("#aiClear").addEventListener("click", () => { $("#aiKey").value = ""; aiSave(); });
+  $("#aiFixClear").addEventListener("click", () => { const n = Object.keys(fixLoad()).length; lsSet(KEY_FIX, "{}"); $("#aiInfo").textContent = "已清除記住的更正（原有 " + n + " 筆）。"; });
   /* 從文字檔載入金鑰：只讀檔案第一個非空白行，不顯示內容，載入後照原流程存進這台瀏覽器 */
   $("#aiLoadKey").addEventListener("click", () => $("#aiKeyFile").click());
   $("#aiKeyFile").addEventListener("change", async (e) => {
@@ -1206,7 +1233,7 @@
     const stn = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = stn ? stn + "派出所" : "";
     const fl = r.codeFlags || []; $("#fCode").classList.toggle("uncertain", fl.length > 0 || (r.status === "ok" && !r.code) || !!(r.aiFilled && r.aiFilled.code));
     $("#codeNote").textContent = fl.length ? "請對照上方圖片核對：" + fl.join("、") : r.code ? (r.codeSoft || "已依案號規則校正。") : "";
-    F.who.value = r.who; setImg($("#stripImg"), r.strip);
+    F.who.value = r.who; setImg($("#stripImg"), r.strip); $("#whoHint").value = r.whoHint || "";
     F.date.value = r.date; setImg($("#dateImg"), r.dateImg);
     $("#fDate").classList.toggle("uncertain", !!r.dateFlag); $("#dateNote").textContent = r.dateFlag || (r.nameDate && r.date === r.nameDate ? "取自檔名" : "");
     $("#sticky").checked = r.sticky; $("#stickyBox").hidden = !r.sticky; setImg($("#stickyImg"), r.sticky ? r.stickyImg : "");
@@ -1242,6 +1269,14 @@
   }
   bind("code", (r) => { r.code = F.code.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); r.codeFlags = []; r.codeSoft = ""; $("#fCode").classList.remove("uncertain"); $("#codeNote").textContent = ""; const s = r.code.length === 15 ? STN[r.code.slice(10, 12)] : ""; $("#codeStn").textContent = s ? s + "派出所" : ""; });
   bind("who"); bind("realWho");
+  /* 我看這個字是…：把看出來的字告訴 AI，只重讀這一頁（承辦人欄位會重新由 AI 判斷，結果一樣標 ⚠ 請核對） */
+  $("#whoHint").addEventListener("input", () => { const r = pages[cur]; if (r) r.whoHint = $("#whoHint").value.replace(/[\s「」"'“”]/g, "").slice(0, 20); });
+  $("#whoHintBtn").addEventListener("click", () => {
+    const r = pages[cur]; if (!r) return;
+    if (!r.whoHint) { show("請先在格子裡打上你看到的字。", "warn"); return; }
+    r.touched.who = false; $("#aiPage").click();
+  });
+  $("#whoHint").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("#whoHintBtn").click(); } });
   $("#stripImg").addEventListener("click", (e) => { const s = e.target.style; const big = s.maxHeight === "900px"; s.maxHeight = big ? "" : "900px"; s.cursor = big ? "zoom-in" : "zoom-out"; });
   bind("date", (r) => { r.dateFlag = ""; $("#fDate").classList.remove("uncertain"); $("#dateNote").textContent = ""; });
   bind("caseNo", (r) => { r.caseNo = F.caseNo.value.trim(); });
@@ -1290,6 +1325,7 @@
   const HEAD = ["承辦人", "E化案號", "發生案號", "發生文號", "實際承辦人", "案類", "文號", "收文日期"];
   const rowsOut = () => pages.filter((r) => !r.skip).map(derive);
   function remember() {
+    learnFixes();
     try { const set = new Set(JSON.parse(lsGet(KEY_C) || "[]")); pages.forEach((r) => { if ((r.type === "cap" || r.type === "xfer") && r.cat) set.add(r.cat); }); lsSet(KEY_C, JSON.stringify(Array.from(set).slice(-60))); fillCats(); } catch (e) {}
   }
   function fillCats() { try { $("#catList").innerHTML = JSON.parse(lsGet(KEY_C) || "[]").map((c) => '<option value="' + esc(c) + '">').join(""); } catch (e) {} }
