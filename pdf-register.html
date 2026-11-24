@@ -168,7 +168,7 @@
     <div id="aiOpts" hidden>
       <div class="two">
         <label class="f">Gemini API 金鑰（到 aistudio.google.com 申請，只存在這台電腦的瀏覽器）
-          <input id="aiKey" type="password" spellcheck="false" autocomplete="off" placeholder="AIza…">
+          <input id="aiKey" type="password" spellcheck="false" autocomplete="off" placeholder="貼上金鑰，或按下方「從文字檔載入金鑰」">
         </label>
         <label class="f">模型名稱
           <input id="aiModel" type="text" spellcheck="false" list="aiModelList" placeholder="gemini-3.5-flash-lite">
@@ -182,6 +182,8 @@
         <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" id="aiOnly">只用 AI，略過本機英數辨識（較快，不用下載辨識引擎）</label></div>
       </div>
       <div class="row">
+        <button id="aiLoadKey" type="button">從文字檔載入金鑰</button>
+        <input id="aiKeyFile" type="file" accept=".txt,text/plain" hidden>
         <button id="aiTest" type="button">測試連線</button>
         <button id="aiAll" type="button">用 AI 讀取所有尚未讀取的頁面</button>
         <button id="aiStop" type="button" hidden>停止 AI</button>
@@ -1051,6 +1053,20 @@
   $("#aiAll").addEventListener("click", aiAllRun);
   $("#aiStop").addEventListener("click", () => { aiStop = true; });
   $("#aiClear").addEventListener("click", () => { $("#aiKey").value = ""; aiSave(); });
+  /* 從文字檔載入金鑰：只讀檔案第一個非空白行，不顯示內容，載入後照原流程存進這台瀏覽器 */
+  $("#aiLoadKey").addEventListener("click", () => $("#aiKeyFile").click());
+  $("#aiKeyFile").addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
+    const info = $("#aiInfo");
+    try {
+      if (f.size > 10240) throw new Error("檔案太大，不像是金鑰檔");
+      const line = (await f.text()).replace(/^\uFEFF/, "").split(/\r?\n/).map((x) => x.trim()).find((x) => x) || "";
+      const key = line.replace(/^[A-Za-z_ ]+\s*[=:]\s*/, "").replace(/^["']|["']$/g, "").trim();
+      if (!/^[\x21-\x7E]{20,}$/.test(key)) throw new Error("檔案內容看起來不是金鑰（應為一行、不含空白或中文）");
+      $("#aiKey").value = key; aiSave();
+      info.textContent = "已從「" + f.name + "」載入金鑰（共 " + key.length + " 個字元），已存在這台電腦的瀏覽器。可以按「測試連線」確認。";
+    } catch (err) { info.textContent = "無法載入金鑰：" + (err && err.message ? err.message : err); }
+  });
   $("#aiTest").addEventListener("click", async () => {
     aiSave(); aiStop = false;
     if (AI.key.length < 10) { $("#aiInfo").textContent = "請先貼上 API 金鑰。"; return; }
