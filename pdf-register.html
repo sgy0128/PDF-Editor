@@ -211,6 +211,12 @@
         </label>
       </div>
       <div class="two">
+        <label class="f">備援模型（主模型額度用完或 Google 伺服器忙碌時改用，留空＝不備援；用備援模型讀的頁面會特別標示）
+          <input id="aiModel2" type="text" spellcheck="false" list="aiModelList" placeholder="gemini-3.8-flash">
+        </label>
+        <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" id="aiZoom">承辦人第一次讀不出來時，自動把手寫處放大再讀一次（只有不確定的頁面會多用 1 次請求）</label></div>
+      </div>
+      <div class="two">
         <label class="f">每分鐘最多送幾頁（免費額度有限，被擋時會自動等待重試）
           <input id="aiRpm" type="text" inputmode="numeric" spellcheck="false" placeholder="5">
         </label>
@@ -868,9 +874,10 @@
   const DESTS_L = DESTS.slice().sort((a, b) => b.length - a.length), tn = (t) => String(t).replace(/臺/g, "台");
   const destFind = (t) => DESTS_L.find((x) => tn(t).includes(tn(x))) || "";   /* 「南投信義」要比「信義」優先；臺／台視為相同 */
   { const dl = $("#destList"); if (dl) dl.innerHTML = DESTS.map((d) => '<option value="' + d + '">').join(""); }   /* 轉往分局的輸入提示 */
-  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", rpm: 5, only: false, rpd: 0 };
+  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", model2: "gemini-3.8-flash", zoom: true, rpm: 5, only: false, rpd: 0 };
   const aiStat = { ok: 0, err: 0, tok: 0 };
   let aiLast = 0, aiStop = false, aiBusy = false, aiFatal = "";
+  let aiSwitched = "", aiSchemaOff = false;   /* aiSwitched：主模型今天額度用完後，這次作業改用的備援模型；aiSchemaOff：模型不接受固定格式時，改回原本的做法 */
   const aiReady = () => AI.on && AI.key.length > 10 && !aiFatal;
   const aiS = (v) => (v == null ? "" : String(v)).trim();
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -896,9 +903,9 @@
   const KEY_USE = "pdf-register-usage";
   const ptDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
   const useLoad = () => { try { const o = JSON.parse(lsGet(KEY_USE) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } };
-  function useAdd(ok, js) {
+  function useAdd(ok, js, model) {
     try {
-      const u = useLoad(), k = ptDay(), t = u[k] || (u[k] = { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }), m = AI.model;
+      const u = useLoad(), k = ptDay(), t = u[k] || (u[k] = { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }), m = model || AI.model;
       const md = (js && js.usageMetadata) || {}, inp = md.promptTokenCount || 0, tot = md.totalTokenCount || 0, out = Math.max(0, tot - inp);
       if (ok) { t.ok++; t.inp += inp; t.out += out; t.tot += tot; } else t.err++;
       const mm = t.m[m] || (t.m[m] = { ok: 0, tot: 0 }); if (ok) { mm.ok++; mm.tot += tot; }
@@ -923,21 +930,24 @@
       : (aiStat.ok || aiStat.err) ? "AI 已讀 " + aiStat.ok + " 次，失敗 " + aiStat.err + " 次，累計約 " + aiStat.tok.toLocaleString() + " tokens。"
       : AI.key.length > 10 ? "已設定金鑰。加入 PDF 後會自動用 AI 讀取；也可以先按「測試連線」。"
       : "請貼上 API 金鑰（到 aistudio.google.com 按 Get API key 申請）。";
+    if (aiSwitched && !aiFatal) el.textContent += "　主模型的額度用完了，目前改用備援模型 " + aiSwitched + "。";
   }
   function aiSave() {
     AI.on = $("#aiOn").checked; AI.key = $("#aiKey").value.trim();
     AI.model = ($("#aiModel").value.trim() || "gemini-3.5-flash-lite").replace(/^models\//, "");
     const n = parseInt($("#aiRpm").value, 10); AI.rpm = n > 0 ? Math.min(n, 300) : 5; AI.only = $("#aiOnly").checked; AI.rpd = Math.max(0, parseInt($("#aiRpd").value, 10) || 0);
+    AI.model2 = $("#aiModel2").value.trim().replace(/^models\//, ""); AI.zoom = $("#aiZoom").checked; aiSwitched = ""; aiSchemaOff = false;
     aiFatal = ""; lsSet(KEY_AI, JSON.stringify(AI)); $("#aiOpts").hidden = !AI.on; aiUi();
   }
   function aiLoad() {
     try { const s = JSON.parse(lsGet(KEY_AI) || "null"); if (s && typeof s === "object") Object.assign(AI, s); } catch (e) {}
     AI.key = String(AI.key || ""); AI.model = String(AI.model || "gemini-3.5-flash-lite").replace(/^models\//, ""); AI.rpm = +AI.rpm > 0 ? +AI.rpm : 5;
     $("#aiOn").checked = !!AI.on; $("#aiKey").value = AI.key; $("#aiModel").value = AI.model; $("#aiRpm").value = AI.rpm; $("#aiOnly").checked = !!AI.only; $("#aiRpd").value = AI.rpd > 0 ? AI.rpd : "";
+    AI.model2 = String(AI.model2 == null ? "" : AI.model2).replace(/^models\//, ""); $("#aiModel2").value = AI.model2; $("#aiZoom").checked = AI.zoom !== false;
     $("#aiOpts").hidden = !AI.on; aiUi();
   }
-  ["aiKey", "aiModel", "aiRpm", "aiRpd"].forEach((id) => $("#" + id).addEventListener("input", aiSave));
-  ["aiOn", "aiOnly"].forEach((id) => $("#" + id).addEventListener("change", aiSave));
+  ["aiKey", "aiModel", "aiModel2", "aiRpm", "aiRpd"].forEach((id) => $("#" + id).addEventListener("input", aiSave));
+  ["aiOn", "aiOnly", "aiZoom"].forEach((id) => $("#" + id).addEventListener("change", aiSave));
 
   /* 限速：兩次送出之間至少隔 60 秒 / 每分鐘頁數；等待時可以按停止 */
   async function waitMsg(ms, label) {
@@ -961,25 +971,29 @@
   }
   const aiDaily = (er) => /PerDay/i.test(JSON.stringify(er || {}));
   const aiZero = (er) => /limit:\s*0\b/.test(String((er && er.message) || ""));
-  function aiErr(code, er) {
+  function aiErr(code, er, model) {
+    model = model || AI.model;
     const m = String(er.message || ""); let t, fatal = false;
     if (code === 400 && /API key/i.test(m)) { t = "API 金鑰無效，請重新貼上"; fatal = true; }
     else if (code === 403) { t = "金鑰沒有權限，或這個地區不能使用（" + m.slice(0, 120) + "）"; fatal = true; }
-    else if (code === 404) { t = "找不到模型「" + AI.model + "」，請改用 gemini-3.5-flash-lite 或 gemini-3.8-flash（新帳號可能無法使用舊的 2.5 系列），或到 AI Studio 查詢可用的模型名稱"; fatal = true; }
+    else if (code === 404) { t = "找不到模型「" + model + "」，請改用 gemini-3.5-flash-lite 或 gemini-3.8-flash（新帳號可能無法使用舊的 2.5 系列），或到 AI Studio 查詢可用的模型名稱"; fatal = true; }
     else if (code === 429) {
       fatal = aiDaily(er) || aiZero(er);
       t = aiDaily(er) ? "今天的免費額度用完了（每天太平洋時間午夜重置，約台灣下午 3～4 點）" : aiZero(er) ? "這個模型沒有免費額度，請改用 gemini-3.5-flash-lite 之類的模型" : "一直被限速，請調低「每分鐘最多送幾頁」";
     } else t = "AI 錯誤 " + code + "：" + m.slice(0, 160);
     const e = new Error(t); e.fatal = fatal; return e;
   }
-  async function callGemini(parts) {
-    const api = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(AI.model) + ":generateContent";
-    const body = JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0, responseMimeType: "application/json" } });
+  async function callGemini(parts, schema) {
+    let model = aiSwitched || AI.model;
+    const toFallback = () => { const m2 = AI.model2; if (m2 && model !== m2) { model = m2; return true; } return false; };
+    const apiOf = () => "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent";
+    const bodyOf = (sch) => JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: sch ? { temperature: 0, responseMimeType: "application/json", responseSchema: sch } : { temperature: 0, responseMimeType: "application/json" } });
     for (let a = 0; ; a++) {
       await aiGate();
+      const useSchema = !!schema && !aiSchemaOff;
       let res, js; const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 150000);
       try {
-        res = await fetch(api, { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": AI.key }, body, signal: ctl.signal });
+        res = await fetch(apiOf(), { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": AI.key }, body: bodyOf(useSchema ? schema : null), signal: ctl.signal });
         js = await res.json().catch(() => ({}));
       } catch (e) {
         clearTimeout(to);
@@ -987,12 +1001,17 @@
         throw new Error(e && e.name === "AbortError" ? "AI 回應逾時" : "無法連線到 Google（" + (e && e.message ? e.message : e) + "），請檢查網路，或網路是否擋住 generativelanguage.googleapis.com");
       }
       clearTimeout(to);
-      if (res.ok) { useAdd(true, js); return js; }
-      useAdd(false, null);
+      if (res.ok) { useAdd(true, js, model); js._model = model; return js; }
+      useAdd(false, null, model);
       const er = js.error || {}, code = res.status;
+      /* 模型不接受固定格式：這次作業改回原本的做法（只靠提示詞要求 JSON），再試一次 */
+      if (code === 400 && useSchema && /schema|propertyOrdering|property_ordering|Unknown name|Invalid JSON payload/i.test(String(er.message || ""))) { aiSchemaOff = true; a = -1; continue; }
       if (code === 429 && !aiDaily(er) && !aiZero(er) && a < 5) { const s = retrySec(er); await waitMsg(((s != null ? s : 20) + 2) * 1000, "達到每分鐘上限，等待"); continue; }
       if ((code === 500 || code === 503 || code === 504) && a < 3) { await waitMsg(8000 * (a + 1), "Google 伺服器忙碌，重試"); continue; }
-      throw aiErr(code, er);
+      /* 備援：主模型今天額度用完（之後都改用備援）、或一直被限速／Google 伺服器忙碌（只這一次改用） */
+      const dead = code === 429 && (aiDaily(er) || aiZero(er));
+      if ((code === 429 || code === 500 || code === 503 || code === 504) && toFallback()) { if (dead) aiSwitched = model; a = -1; aiUi(); continue; }
+      throw aiErr(code, er, model);
     }
   }
   function aiText(js) {
@@ -1047,12 +1066,66 @@
       ' "note": "哪個欄位看不清楚、哪裡讓你不確定，簡短說明；沒有就空字串"\n}' +
       "\n\n分局名單：" + DESTS.join("、") + "\n名單簡稱說明：「中市」＝臺中市、「南市」＝臺南市、「竹市」＝新竹市、「嘉市」＝嘉義市、「基市」＝基隆市，後面的數字是第幾分局（例如「中市六」＝臺中市第六分局）；「三民一」「三民二」＝高雄市三民第一、第二分局；「中正一」「中正二」「文山一」「文山二」＝臺北市的分局；「南投信義」＝南投縣信義分局，「信義」＝臺北市信義分局。";
   }
+
+  /* 送給 Gemini 的固定回傳格式：欄位順序讓 who_raw（實際看到的字）排在 who（判斷結果）前面，先抄字再判斷 */
+  const AI_SCHEMA = (() => {
+    const S = { type: "STRING" }, A = { type: "ARRAY", items: { type: "STRING" } }, B = { type: "ARRAY", items: { type: "INTEGER" } };
+    const props = { type: S, station_name: S, code: S, code_box: B, who_raw: S, who: S, who_candidates: A, who_box: B, has_sticky: S, sticky_who_raw: S, sticky_who: S, sticky_candidates: A, sticky_transfer: S, cat: S, doc_no: S, date: S, note: S };
+    return { type: "OBJECT", properties: props, propertyOrdering: Object.keys(props) };
+  })();
+  const AI_ZOOM_SCHEMA = { type: "OBJECT", properties: { who_raw: { type: "STRING" }, who: { type: "STRING" }, who_candidates: { type: "ARRAY", items: { type: "STRING" } }, note: { type: "STRING" } }, propertyOrdering: ["who_raw", "who", "who_candidates", "note"] };
+
+  /* 二次放大重讀：第一次讀不出承辦人（或有好幾位候選）時，只把手寫處放大再問一次。
+     兩次讀法一致才採用；兩次不同就不填，只列出候選，讓你自己核對。出任何錯都不影響第一次讀到的結果。 */
+  async function aiZoomWho(rec, j, strip, wb) {
+    if (!AI.zoom || !aiReady() || rec.whoHint || rec.touched.who || rec.type === "xfer") return;
+    if (aiS(j.sticky_transfer) || aiS(j.type) === "xfer" || destFind(aiS(j.who) + aiS(j.who_raw))) return;   /* 寫的是轉往的分局，不是人名 */
+    const p1 = rosterPick(j.who, j.who_raw, j.who_candidates);
+    if (p1.name) return;   /* 第一次就確定了，不用再讀 */
+    let x0 = wb[1] / 1000 - 0.04, x1 = wb[3] / 1000 + 0.04, y0 = wb[0] / 1000 - 0.03, y1 = wb[2] / 1000 + 0.03;
+    if (x1 - x0 < 0.3) { const m = (x0 + x1) / 2; x0 = m - 0.15; x1 = m + 0.15; }
+    if (y1 - y0 < 0.08) { const m = (y0 + y1) / 2; y0 = m - 0.04; y1 = m + 0.04; }
+    x0 = Math.max(0, x0); x1 = Math.min(1, x1); y0 = Math.max(0, y0); y1 = Math.min(1, y1);
+    const sc = Math.max(1, Math.min(3, 1000 / Math.max(1, strip.width * (x1 - x0)), 1400 / Math.max(1, strip.height * (y1 - y0))));
+    const c = cropC(strip, x0, y0, x1, y1, sc);
+    if (c.width < 20 || c.height < 20) { c.width = c.height = 1; return; }
+    const prompt = "這是一張放大的手寫字截圖，出自台灣派出所「陳報單」或「刑案呈報單」右下邊緣的承辦人簽名處。可能只寫了姓名中的一兩個字，也可能是潦草的簽名。\n" +
+      "請只回傳一個 JSON 物件，不要其他文字：\n{\n \"who_raw\": \"你實際看到的字，逐字照抄；完全看不出來就回空字串\",\n" +
+      " \"who\": \"從下面的名單選出最像的一位，回名單上的全名；沒有把握就回空字串，不要猜\",\n" +
+      " \"who_candidates\": [\"無法確定時，列出最多 3 位名單中可能的人；否則回空陣列\"],\n" +
+      " \"note\": \"哪裡看不清楚，簡短說明；沒有就空字串\"\n}\n" +
+      "如果寫的是轉往的分局名稱而不是人名，who 回空字串，who_raw 照抄。\n\n名單：" + roster.join("、");
+    let js2;
+    try {
+      js2 = await callGemini([{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: url(c, 0.92).split(",")[1] } }], AI_ZOOM_SCHEMA);
+    } catch (e) {
+      const m = e && e.message ? e.message : String(e);
+      if (e && e.fatal) { aiFatal = m; show("AI 已暫停：" + m, "warn"); }
+      if (m !== "已停止") j._zoom = "放大重讀沒有完成（" + m.slice(0, 60) + "）";
+      return;
+    } finally { c.width = c.height = 1; }
+    aiStat.tok += (js2.usageMetadata && js2.usageMetadata.totalTokenCount) || 0;
+    (rec.aiModels = rec.aiModels || []).push(js2._model);
+    let j2; try { j2 = aiJson(aiText(js2)); } catch (e) { j._zoom = "放大重讀的回覆無法解析"; return; }
+    if (!j2 || typeof j2 !== "object" || Array.isArray(j2)) return;
+    const p2 = rosterPick(j2.who, j2.who_raw, j2.who_candidates), raw2 = aiS(j2.who_raw);
+    if (p2.name) {
+      if (p1.maybe.length && !p1.maybe.includes(p2.name)) {   /* 兩次讀法不一致：不填，列出候選 */
+        j.who = ""; j.who_candidates = Array.from(new Set([...p1.maybe, p2.name])).slice(0, 4); j._zoom = "放大重讀與第一次讀的不同，請對照圖片自己判斷";
+      } else {
+        j.who = p2.name; j.who_candidates = []; if (raw2) j.who_raw = raw2; j._zoom = "第一次讀不出來，放大手寫處重讀後確定";
+      }
+    } else if (p2.maybe.length) {
+      j.who_candidates = Array.from(new Set([...p1.maybe, ...p2.maybe])).slice(0, 4); if (raw2 && !aiS(j.who_raw)) j.who_raw = raw2; j._zoom = "放大重讀後仍無法確定";
+    } else if (raw2 && !aiS(j.who_raw)) j.who_raw = raw2;
+  }
   async function aiRead(rec, full, st, bt) {
     const shots = aiShots(full, st, bt);
     try {
       const parts = [{ text: aiPrompt(shots, rec.whoHint) }];
       shots.forEach((x, i) => { parts.push({ text: "圖" + (i + 1) + "：" + x.label }); parts.push({ inline_data: { mime_type: "image/jpeg", data: url(x.c, 0.85).split(",")[1] } }); });
-      const js = await callGemini(parts);
+      const js = await callGemini(parts, AI_SCHEMA);
+      rec.aiModels = [js._model];
       aiStat.tok += (js.usageMetadata && js.usageMetadata.totalTokenCount) || 0;
       const j = aiJson(aiText(js));
       /* 只用 AI 時沒有本機的案號裁切圖：依 AI 回報的位置裁出案號那一行，位置不合理就放整個上緣 */
@@ -1079,6 +1152,7 @@
         const c = cropC(sp.c, x0, y0, x1, y1, Math.min(2.5, 600 / Math.max(1, sp.c.width * (x1 - x0))));
         if (c.width > 20 && c.height > 20) { rec.strip = url(c, 0.9); rec.showFull = false; }
         c.width = c.height = 1;
+        await aiZoomWho(rec, j, sp.c, wb);
       }
       return j;
     } finally { shots.forEach((x) => { x.c.width = x.c.height = 1; }); }
@@ -1161,7 +1235,8 @@
     }
     const ad = parseDate(aiS(j.date));
     if (ad && !T.date && !rec.nameDate && !rec.ocrDate) rec.ocrDate = ad;
-    const note = (aiS(j.note) + (sTrD && !DESTS.includes(sTrD) ? "　便條紙的分局「" + sTrD + "」不在已知名單，請對照圖片確認" : "")).slice(0, 120);
+    const fbm = Array.from(new Set((rec.aiModels || []).filter((m) => m && m !== AI.model))), fbNote = fbm.length ? "　由備援模型 " + fbm.join("、") + " 讀取，請特別留意核對" : "";
+    const note = (aiS(j.note) + (sTrD && !DESTS.includes(sTrD) ? "　便條紙的分局「" + sTrD + "」不在已知名單，請對照圖片確認" : "") + (j._zoom ? "　" + j._zoom : "") + fbNote).slice(0, 220);
     rec.aiFlag = done.length ? "AI 已填入：" + done.join("、") + "，請核對" + (note ? "（" + note + "）" : "")
       : (rec.aiMiss || rec.aiMissS) ? "AI 無法確定承辦人，請核對" : note ? "AI 備註：" + note : "";
     rec.aiDone = true;
