@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="zh-Hant" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 合併工具</title>
+<script>(function(){var t=null,m=location.search.match(/[?&]theme=(dark|light)/);try{if(m){t=m[1];localStorage.setItem("pdf-tools-theme",t)}else t=localStorage.getItem("pdf-tools-theme")}catch(e){if(m)t=m[1]}document.documentElement.dataset.theme=t==="dark"?"dark":"light"})();</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a8277'/%3E%3Cpath d='M20 10h18l12 12v28a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V14a4 4 0 0 1 4-4z' fill='white'/%3E%3Cpath d='M32 28v18M23 37h18' stroke='%230a8277' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fbfcfe; --panel: #ffffff; --fg: #19263a; --muted: #5d6b82; --line: #e3e9f2;
+    --accent: #0a8277; --accent-fg: #ffffff; --accent-soft: #d9f4ef;
+    --danger: #c62828; --danger-soft: #fdecec; --drop: #e8f7f4;
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1724; --panel: #172133; --fg: #e7edf7; --muted: #94a3bb; --line: #2a3750;
+    --accent: #3fc4b5; --accent-fg: #0b1220; --accent-soft: #153a38;
+    --danger: #ff8a80; --danger-soft: #3a1f24; --drop: #123331;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; background: var(--panel);
+    padding: 64px 16px; text-align: center; cursor: pointer; transition: .15s; }
+  #drop.over { border-color: var(--accent); background: var(--drop); }
+  #drop strong { display: block; font-size: 1.25rem; margin-bottom: 6px; }
+  #drop span { color: var(--muted); font-size: .9rem; }
+  #dropOv { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center; pointer-events: none;
+    background: color-mix(in srgb, var(--accent) 14%, transparent); border: 4px dashed var(--accent); }
+  #dropOv.show { display: flex; }
+  #dropOv b { padding: 16px 28px; border-radius: 12px; background: var(--panel); color: var(--accent); font-size: 1.3rem; box-shadow: 0 8px 28px rgba(0,0,0,.25); }
+  #list { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .item { display: flex; align-items: center; gap: 10px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .item.dragging { opacity: .4; }
+  .item.target { border-color: var(--accent); box-shadow: 0 -2px 0 var(--accent); }
+  .grip { cursor: grab; color: var(--muted); user-select: none; font-size: 1.1rem; }
+  .idx { width: 1.8em; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .info { flex: 1; min-width: 0; }
+  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: .82rem; }
+  .range { width: 7.5em; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--fg); font: inherit; font-size: .85rem; }
+  .range.bad { border-color: var(--danger); }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--fg); padding: 5px 9px; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 16px; }
+  .tools .grow { flex: 1; }
+  .total { color: var(--muted); font-size: .9rem; }
+  .merge { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px;
+    padding-top: 20px; border-top: 1px solid var(--line); }
+  .merge input { flex: 1; min-width: 180px; padding: 9px 10px; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--panel); color: var(--fg); font: inherit; }
+  .merge .opt { display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
+  .merge input[type=checkbox] { flex: none; min-width: 0; width: 16px; height: 16px; padding: 0; accent-color: var(--accent); }
+  .primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
+    padding: 9px 22px; font-weight: 600; }
+  .primary:hover:not(:disabled) { filter: brightness(1.08); }
+  #msg { margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: var(--accent-soft); display: none; }
+  #msg.err { background: var(--danger-soft); color: var(--danger); }
+  #msg.show { display: block; }
+  .hint { color: var(--muted); font-size: .82rem; margin-top: 20px; }
+  .theme-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--panel); color: var(--fg); font: inherit; font-size: .85rem; cursor: pointer; white-space: nowrap; }
+  .theme-btn:hover { border-color: var(--accent); }
+  .theme-btn svg { width: 16px; height: 16px; }
+  .theme-btn .i-sun, .theme-btn .lbl-light { display: none; }
+  :root[data-theme="dark"] .theme-btn .i-sun, :root[data-theme="dark"] .theme-btn .lbl-light { display: inline; }
+  :root[data-theme="dark"] .theme-btn .i-moon, :root[data-theme="dark"] .theme-btn .lbl-dark { display: none; }
+  .home { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 5px 14px 5px 6px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--fg);
+    text-decoration: none; font-size: .88rem; font-weight: 600; white-space: nowrap; transition: border-color .15s, color .15s; }
+  .home .hi { width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+    display: flex; align-items: center; justify-content: center; }
+  .home .hi svg { width: 14px; height: 14px; }
+  .home:hover, .home:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .home:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+
+  /* ===== 共用：頂部列與版面比例（所有頁面一致） ===== */
+  body { font-size: 15px; line-height: 1.5; }
+  h1 { font-size: 1.5rem; line-height: 1.3; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 56px; margin: 0; padding: 0 24px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+  .topbar .home { align-self: center; }
+  .topbar .theme-btn { margin-left: auto; padding: 6px 12px; font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="topbar"><a class="home" data-nav="index.html" href="index.html" title="回到工具箱首頁"><span class="hi" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg></span>工具箱首頁</a><button class="theme-btn" id="themeBtn" type="button" aria-label="切換深色或淺色主題" title="切換深色或淺色主題"><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span class="lbl-dark">深色</span><span class="lbl-light">淺色</span></button></div>
+<div id="dropOv" aria-hidden="true"><b>放開即可加入檔案</b></div>
+<main>
+  
+  <h1>PDF 合併工具</h1>
+  <p class="sub">檔案只在你的瀏覽器內處理，不會上傳到任何地方。</p>
+
+  <div id="drop" tabindex="0" role="button" aria-label="選擇或拖曳 PDF 檔案">
+    <strong>把整個資料夾或 PDF 拖到這個頁面的任何地方</strong>
+    <span>放開就會自動加入清單；也可以點這裡選檔案，支援 JPG、PNG 圖片（每張一頁）</span>
+  </div>
+  <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <button id="pickDir" type="button">選擇資料夾</button>
+    <span class="hint" style="margin:0">資料夾內的子資料夾也會一起讀取，檔案依檔名排序後加入清單。</span>
+  </div>
+  <input id="file" type="file" accept="application/pdf,image/jpeg,image/png" multiple hidden>
+  <input id="dirIn" type="file" webkitdirectory multiple hidden>
+
+  <ul id="list"></ul>
+
+  <div class="tools" id="tools" hidden>
+    <span class="total" id="total"></span>
+    <span class="grow"></span>
+    <button id="sortName">依檔名排序</button>
+    <button id="clear">全部清除</button>
+  </div>
+
+  <div class="merge">
+    <input id="outName" type="text" aria-label="輸出檔名" spellcheck="false">
+    <label class="opt"><input type="checkbox" id="even" checked>補足偶數頁</label>
+    <label class="opt" title="每個 PDF 只取第一頁，其餘頁面略過"><input type="checkbox" id="firstOnly">每個檔案僅取第一面</label>
+    <button class="primary" id="go" disabled>合併並下載</button>
+  </div>
+  <div id="msg" role="status"></div>
+
+  <p class="hint">拖曳左側 ⋮⋮ 或用上下鍵調整順序。「頁碼」欄可只取部分頁面，例如 1-3,5，留空代表全部。</p>
+</main>
+
+<script>
+(function () {
+  var items = [];
+  var nextId = 1;
+  var $ = function (s) { return document.querySelector(s); };
+  var list = $("#list"), msg = $("#msg");
+
+  function today() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+  }
+  $("#outName").value = "合併_" + today() + ".pdf";
+
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function size(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+  function show(text, err) { msg.textContent = text; msg.className = "show" + (err ? " err" : ""); }
+  function hide() { msg.className = ""; }
+
+  async function addFiles(files, label) {
+    hide();
+    var failed = [];
+    for (var f of Array.from(files)) {
+      var isImg = /^image\/(jpeg|png)$/.test(f.type);
+      var isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+      if (!isImg && !isPdf) { failed.push(f.name + "（不支援的格式）"); continue; }
+      try {
+        var buf = await f.arrayBuffer();
+        var pages = 1, raster = false;
+        if (isPdf) {
+          try {
+            var doc = await PDFLib.PDFDocument.load(buf, { ignoreEncryption: true });
+            if (doc.isEncrypted) throw new Error("encrypted");
+            pages = doc.getPageCount();
+          } catch (e1) { pages = await rasterPages(buf); raster = true; }
+        }
+        items.push({ id: nextId++, name: f.name, kind: isImg ? "img" : "pdf", type: f.type,
+          pages: pages, size: f.size, range: "", buf: buf, raster: raster });
+      } catch (e) {
+        failed.push(f.name + "（無法讀取，可能需要開啟密碼或檔案損毀）");
+      }
+    }
+    render();
+    if (failed.length) show((label ? "已加入資料夾「" + label + "」，但" : "") + "以下檔案未加入：" + failed.join("、"), true);
+    else if (label) show("已加入資料夾「" + label + "」的檔案，目前共 " + items.length + " 個。");
+  }
+
+  /* ---------- 資料夾讀取 ---------- */
+  var MEDIA = /\.(pdf|jpe?g|png)$/i, skippedN = 0;
+  function natural(a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); }
+  async function walkDir(dir, out) {
+    for await (var ent of dir.values()) {
+      try {
+        if (ent.kind === "file") { if (MEDIA.test(ent.name)) out.push(await ent.getFile()); }
+        else await walkDir(ent, out);
+      } catch (e) { skippedN++; }
+    }
+  }
+  function entryFile(en) { return new Promise(function (ok, no) { en.file(ok, no); }); }
+  function readAll(reader) {
+    return new Promise(function (ok, no) {
+      var all = [];
+      (function next() { reader.readEntries(function (b) { if (!b.length) ok(all); else { all = all.concat(Array.from(b)); next(); } }, no); })();
+    });
+  }
+  async function walkEntry(en, out) {
+    try {
+      if (en.isFile) { if (MEDIA.test(en.name)) out.push(await entryFile(en)); }
+      else if (en.isDirectory) { for (var k of await readAll(en.createReader())) await walkEntry(k, out); }
+    } catch (e) { skippedN++; }
+  }
+  async function addFolder(out, label) {
+    out.sort(natural);
+    await addFiles(out, label);
+    if (skippedN) show(msg.textContent + "（有 " + skippedN + " 個檔案讀不到，已略過）", true);
+  }
+  $("#pickDir").addEventListener("click", async function () {
+    if (window.showDirectoryPicker) {
+      try {
+        var dir = await window.showDirectoryPicker();
+        skippedN = 0; var out = []; await walkDir(dir, out);
+        await addFolder(out, dir.name); return;
+      } catch (e) { if (e && e.name === "AbortError") return; }
+    }
+    $("#dirIn").click();
+  });
+  $("#dirIn").addEventListener("change", function () {
+    var all = Array.from(this.files), list = all.filter(function (f) { return MEDIA.test(f.name); });
+    var label = all.length && all[0].webkitRelativePath ? all[0].webkitRelativePath.split("/")[0] : "資料夾";
+    if (!all.length) show("瀏覽器沒有回傳任何檔案，請改用拖曳資料夾。", true);
+    else if (!list.length) show("這個資料夾裡沒有 PDF、JPG 或 PNG 檔案。", true);
+    else { skippedN = 0; addFolder(list, label); }
+    this.value = "";
+  });
+
+  function parseRange(text, pages) {
+    text = text.trim();
+    if (!text) return Array.from({ length: pages }, function (_, i) { return i; });
+    var out = [];
+    text.split(/[,，]/).forEach(function (part) {
+      part = part.trim();
+      if (!part) return;
+      var m = part.match(/^(\d+)(?:\s*[-–~]\s*(\d+))?$/);
+      if (!m) throw new Error("頁碼格式錯誤：" + part);
+      var a = +m[1], b = m[2] ? +m[2] : a;
+      if (a < 1 || b < a || b > pages) throw new Error("頁碼超出範圍（共 " + pages + " 頁）：" + part);
+      for (var i = a; i <= b; i++) out.push(i - 1);
+    });
+    if (!out.length) throw new Error("頁碼不能為空");
+    return out;
+  }
+
+  if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  async function rasterPages(buf) {
+    var d = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise, n = d.numPages; d.destroy(); return n;
+  }
+  /* 有權限限制（加密）的 PDF：把每頁轉成圖片再放進合併檔 */
+  async function rasterInto(out, it, idx, evenPad) {
+    var d = await pdfjsLib.getDocument({ data: it.buf.slice(0) }).promise, lastSz = null;
+    try {
+      for (var i of idx) {
+        var pg = await d.getPage(i + 1), v1 = pg.getViewport({ scale: 1 }), v2 = pg.getViewport({ scale: 2.5 });
+        var c = document.createElement("canvas"); c.width = Math.floor(v2.width); c.height = Math.floor(v2.height);
+        var ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+        await pg.render({ canvasContext: ctx, viewport: v2 }).promise;
+        var blob = await new Promise(function (r) { c.toBlob(r, "image/jpeg", 0.88); });
+        var im = await out.embedJpg(await blob.arrayBuffer());
+        out.addPage([v1.width, v1.height]).drawImage(im, { x: 0, y: 0, width: v1.width, height: v1.height });
+        lastSz = [v1.width, v1.height]; c.width = c.height = 0;
+      }
+    } finally { d.destroy(); }
+    if (evenPad && idx.length % 2 === 1 && lastSz) { out.addPage(lastSz); return 1; }
+    return 0;
+  }
+
+  function firstOnly() { return $("#firstOnly").checked; }
+  /* 實際要取的頁面（0 起算）：勾選「僅取第一面」時一律只取第 1 頁 */
+  function idxOf(it) { return firstOnly() ? [0] : parseRange(it.range, it.pages); }
+  function validRange(it) { if (firstOnly()) return true; try { parseRange(it.range, it.pages); return true; } catch (e) { return false; } }
+  function updateTotal() {
+    var total = 0;
+    items.forEach(function (it) { try { total += idxOf(it).length; } catch (e) {} });
+    $("#total").textContent = items.length + " 個檔案 · 合計 " + total + " 頁";
+  }
+  function syncFirstOnly() {
+    var f = firstOnly();
+    $("#even").disabled = f;
+    $("#even").closest("label").style.opacity = f ? ".45" : "";
+  }
+
+  function render() {
+    list.innerHTML = items.map(function (it, i) {
+      return '<li class="item" draggable="true" data-id="' + it.id + '">' +
+        '<span class="grip" aria-hidden="true">⋮⋮</span>' +
+        '<span class="idx">' + (i + 1) + '</span>' +
+        '<div class="info"><div class="name" title="' + esc(it.name) + '">' + esc(it.name) + '</div>' +
+        '<div class="meta">' + (it.kind === "img" ? "圖片" : it.pages + " 頁") + ' · ' + size(it.size) + (it.raster ? ' · 加密檔，將以圖片方式合併' : '') + '</div></div>' +
+        (it.kind === "pdf" ? '<input class="range' + (validRange(it) ? "" : " bad") + '" data-act="range"' + (firstOnly() ? ' disabled placeholder="僅第 1 頁"' : ' placeholder="頁碼：全部"') + ' value="' + esc(it.range) + '" aria-label="頁碼範圍">' : "") +
+        '<button data-act="up" aria-label="上移"' + (i === 0 ? " disabled" : "") + '>↑</button>' +
+        '<button data-act="down" aria-label="下移"' + (i === items.length - 1 ? " disabled" : "") + '>↓</button>' +
+        '<button data-act="del" aria-label="移除">✕</button></li>';
+    }).join("");
+    $("#tools").hidden = !items.length;
+    $("#go").disabled = !items.length;
+    updateTotal();
+  }
+
+  function find(el) {
+    var li = el.closest(".item");
+    if (!li) return -1;
+    return items.findIndex(function (x) { return x.id === +li.dataset.id; });
+  }
+  function move(i, j) { var t = items.splice(i, 1)[0]; items.splice(j, 0, t); render(); }
+
+  list.addEventListener("click", function (e) {
+    var act = e.target.dataset.act; if (!act || act === "range") return;
+    var i = find(e.target); if (i < 0) return;
+    if (act === "up" && i > 0) move(i, i - 1);
+    if (act === "down" && i < items.length - 1) move(i, i + 1);
+    if (act === "del") { items.splice(i, 1); render(); }
+  });
+  list.addEventListener("input", function (e) {
+    if (e.target.dataset.act !== "range") return;
+    var i = find(e.target); items[i].range = e.target.value;
+    e.target.classList.toggle("bad", !validRange(items[i]));
+    updateTotal();
+  });
+
+  var dragId = null;
+  list.addEventListener("dragstart", function (e) {
+    var li = e.target.closest(".item"); if (!li) return;
+    dragId = +li.dataset.id; li.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "");
+  });
+  list.addEventListener("dragover", function (e) {
+    if (dragId === null) return;
+    e.preventDefault();
+    list.querySelectorAll(".target").forEach(function (n) { n.classList.remove("target"); });
+    var li = e.target.closest(".item"); if (li) li.classList.add("target");
+  });
+  list.addEventListener("drop", function (e) {
+    if (dragId === null) return;
+    e.preventDefault();
+    var from = items.findIndex(function (x) { return x.id === dragId; });
+    var to = find(e.target);
+    dragId = null;
+    if (from >= 0 && to >= 0 && from !== to) move(from, to); else render();
+  });
+  list.addEventListener("dragend", function () { dragId = null; render(); });
+
+  var drop = $("#drop"), input = $("#file");
+  drop.addEventListener("click", function () { input.click(); });
+  drop.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } });
+  input.addEventListener("change", function () { addFiles(input.files); input.value = ""; });
+  /* 整個頁面都是放置區：拖檔案進來時顯示提示，放開就加入 */
+  var ov = $("#dropOv"), depth = 0;
+  function hasFiles(e) { return e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") !== -1; }
+  function endOver() { depth = 0; ov.classList.remove("show"); drop.classList.remove("over"); }
+  window.addEventListener("dragenter", function (e) {
+    if (dragId !== null || !hasFiles(e)) return;
+    e.preventDefault(); depth++; ov.classList.add("show"); drop.classList.add("over");
+  });
+  window.addEventListener("dragover", function (e) { if (dragId === null && hasFiles(e)) e.preventDefault(); });
+  window.addEventListener("dragleave", function (e) {
+    if (dragId !== null || !hasFiles(e)) return;
+    depth = Math.max(0, depth - 1); if (!depth) endOver();
+  });
+  window.addEventListener("drop", async function (e) {
+    endOver();
+    if (dragId !== null) return;
+    e.preventDefault();
+    if (!hasFiles(e)) return;
+    var dt = e.dataTransfer, ents = [];
+    /* 必須在 await 之前同步取得 */
+    var hps = dt.items ? Array.from(dt.items).map(function (it) {
+      return it.kind === "file" && it.getAsFileSystemHandle ? it.getAsFileSystemHandle().catch(function () { return null; }) : null;
+    }) : [];
+    if (dt.items) Array.from(dt.items).forEach(function (it) { var en = it.webkitGetAsEntry && it.webkitGetAsEntry(); if (en) ents.push(en); });
+    var plain = Array.from(dt.files);
+    skippedN = 0;
+    var hs = (await Promise.all(hps)).filter(Boolean);
+    var dirs = hs.filter(function (h) { return h.kind === "directory"; });
+    if (dirs.length) {
+      try {
+        show("讀取資料夾中…");
+        var out = []; for (var d of dirs) await walkDir(d, out);
+        for (var h of hs) if (h.kind === "file" && MEDIA.test(h.name)) out.push(await h.getFile());
+        await addFolder(out, dirs.map(function (x) { return x.name; }).join("、"));
+        return;
+      } catch (err) { skippedN = 0; }
+    }
+    if (ents.some(function (en) { return en.isDirectory; })) {
+      try {
+        show("讀取資料夾中…");
+        var out2 = []; for (var en of ents) await walkEntry(en, out2);
+        await addFolder(out2, ents.filter(function (x) { return x.isDirectory; }).map(function (x) { return x.name; }).join("、"));
+      } catch (err) { show("讀取資料夾失敗：" + ((err && (err.name + " " + err.message)) || String(err)), true); }
+    } else if (plain.length) addFiles(plain);
+  });
+
+  $("#sortName").addEventListener("click", function () {
+    items.sort(function (a, b) { return a.name.localeCompare(b.name, "zh-Hant", { numeric: true }); });
+    render();
+  });
+  $("#clear").addEventListener("click", function () { items = []; hide(); render(); });
+
+  $("#go").addEventListener("click", async function () {
+    var btn = this; hide();
+    try {
+      var jobs = items.map(function (it) { return { it: it, idx: idxOf(it) }; });
+      btn.disabled = true; btn.textContent = "合併中…";
+      var out = await PDFLib.PDFDocument.create();
+      var evenPad = $("#even").checked && !firstOnly(), blanks = 0;
+      for (var j of jobs) {
+        var it = j.it;
+        if (it.raster) {
+          blanks += await rasterInto(out, it, j.idx, evenPad);
+        } else if (it.kind === "pdf") {
+          var src = await PDFLib.PDFDocument.load(it.buf, { ignoreEncryption: true });
+          var pgs = await out.copyPages(src, j.idx);
+          var lastPg;
+          pgs.forEach(function (p) { lastPg = out.addPage(p); });
+          if (evenPad && pgs.length % 2 === 1) { var sz = lastPg.getSize(); out.addPage([sz.width, sz.height]); blanks++; }
+        } else {
+          var img = it.type === "image/png" ? await out.embedPng(it.buf) : await out.embedJpg(it.buf);
+          var page = out.addPage([img.width, img.height]);
+          page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+          if (evenPad) { out.addPage([img.width, img.height]); blanks++; }
+        }
+      }
+      var bytes = await out.save();
+      var name = ($("#outName").value.trim() || "合併.pdf");
+      if (!/\.pdf$/i.test(name)) name += ".pdf";
+      var url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+      var a = document.createElement("a");
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+      show("完成：" + name + "（" + out.getPageCount() + " 頁，" + size(bytes.length) + (blanks ? "，補了 " + blanks + " 張空白頁" : "") + "）");
+    } catch (e) {
+      show("合併失敗：" + e.message, true);
+    } finally {
+      btn.textContent = "合併並下載"; btn.disabled = !items.length;
+    }
+  });
+
+  try { var ev = localStorage.getItem("pdf-merge-even"); if (ev !== null) $("#even").checked = ev === "1"; } catch (e) {}
+  syncFirstOnly();
+  $("#firstOnly").addEventListener("change", function () { syncFirstOnly(); render(); });
+  $("#even").addEventListener("change", function () { try { localStorage.setItem("pdf-merge-even", this.checked ? "1" : "0"); } catch (e) {} });
+  if (!window.PDFLib) show("無法載入 PDF 處理元件，請確認網路連線後重新整理頁面。", true);
+  render();
+})();
+</script>
+<script>
+(function () {
+  function cur() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
+  function sync() { var t = cur(); document.querySelectorAll("a[data-nav]").forEach(function (a) { a.href = a.getAttribute("data-nav") + "?theme=" + t; }); }
+  var b = document.getElementById("themeBtn");
+  if (b) b.addEventListener("click", function () {
+    var n = cur() === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = n;
+    try { localStorage.setItem("pdf-tools-theme", n); } catch (e) {}
+    sync();
+  });
+  sync();
+})();
+</script>
+</body>
+</html>
