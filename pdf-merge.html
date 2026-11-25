@@ -440,12 +440,8 @@
   });
 
   try { var ev = localStorage.getItem("pdf-merge-even"); if (ev !== null) $("#even").checked = ev === "1"; } catch (e) {}
-  try { if (localStorage.getItem("pdf-merge-first") === "1") $("#firstOnly").checked = true; } catch (e) {}
   syncFirstOnly();
-  $("#firstOnly").addEventListener("change", function () {
-    try { localStorage.setItem("pdf-merge-first", this.checked ? "1" : "0"); } catch (e) {}
-    syncFirstOnly(); render();
-  });
+  $("#firstOnly").addEventListener("change", function () { syncFirstOnly(); render(); });
   $("#even").addEventListener("change", function () { try { localStorage.setItem("pdf-merge-even", this.checked ? "1" : "0"); } catch (e) {} });
   if (!window.PDFLib) show("無法載入 PDF 處理元件，請確認網路連線後重新整理頁面。", true);
   render();
