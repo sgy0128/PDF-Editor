@@ -31,7 +31,9 @@
   .box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
   .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; }
-  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:hover:not(:disabled), a.lnkbtn:hover { border-color: var(--accent); }
+  a.lnkbtn { display: inline-block; font: inherit; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; text-decoration: none; }
+  a.lnkbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button:disabled { opacity: .4; cursor: default; }
   button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; padding: 9px 20px; }
@@ -240,6 +242,7 @@
         <div class="row" style="margin-top:8px">
           <label class="f" style="margin:0;flex-direction:row;align-items:center;gap:8px">每日請求上限（選填；到 AI Studio 的「Rate limit」頁查這個模型的每日請求數）<input id="aiRpd" type="text" inputmode="numeric" spellcheck="false" style="width:90px" placeholder="例如 1000"></label>
           <button id="aiUseClear" type="button">清除用量紀錄</button>
+          <a class="lnkbtn" href="https://aistudio.google.com/rate-limit?timeRange=last-28-days&amp;project=gen-lang-client-0555782270" target="_blank" rel="noopener noreferrer">開啟 Google 的額度頁（Rate limit）↗</a>
         </div>
         <p class="hint">用量是每次 Google 回傳的 token 數累加起來的，以太平洋時間的日期歸檔（和免費額度的重置時間一致）。同一把金鑰如果在別台電腦或別的程式也有使用，這裡看不到，實際剩餘請以 AI Studio 的 Usage 頁面為準。</p>
       </div>
@@ -939,6 +942,7 @@
   function useAdd(ok, js, model) {
     try {
       const u = useLoad(), k = ptDay(), t = u[k] || (u[k] = { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }), m = model || AI.model;
+      if (ok && m !== AI.model) t.fb = (t.fb || 0) + 1;   /* 由備援模型讀的請求數 */
       const md = (js && js.usageMetadata) || {}, inp = md.promptTokenCount || 0, tot = md.totalTokenCount || 0, out = Math.max(0, tot - inp);
       if (ok) { t.ok++; t.inp += inp; t.out += out; t.tot += tot; } else t.err++;
       const mm = t.m[m] || (t.m[m] = { ok: 0, tot: 0 }); if (ok) { mm.ok++; mm.tot += tot; }
@@ -946,15 +950,19 @@
       lsSet(KEY_USE, JSON.stringify(u));
     } catch (e) {}
   }
+  function useBump(key) {   /* 額外記一筆，例如 zoom＝二次放大 */
+    try { const u = useLoad(), k = ptDay(), t = u[k] || (u[k] = { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }); t[key] = (t[key] || 0) + 1; lsSet(KEY_USE, JSON.stringify(u)); } catch (e) {}
+  }
   function useUi() {
     const el = $("#aiUse"); if (!el) return;
     const u = useLoad(), k = ptDay(), t = u[k] || { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }, lim = +AI.rpd > 0 ? +AI.rpd : 0, nf = (n) => Number(n).toLocaleString();
-    el.textContent = "今天（太平洋時間 " + k + "，台灣約隔天下午 3～4 點重置）：成功 " + t.ok + " 次、失敗 " + t.err + " 次；共約 " + nf(t.tot) + " tokens（輸入 " + nf(t.inp) + "、輸出與思考 " + nf(t.out) + "）" + (lim ? "。每日上限 " + lim + " 次，約剩 " + Math.max(0, lim - t.ok - t.err) + " 次" : "");
+    el.textContent = "今天（太平洋時間 " + k + "，台灣約隔天下午 3～4 點重置）：成功 " + t.ok + " 次、失敗 " + t.err + " 次；共約 " + nf(t.tot) + " tokens（輸入 " + nf(t.inp) + "、輸出與思考 " + nf(t.out) + "）" + (t.zoom || t.fb ? "；其中二次放大 " + (t.zoom || 0) + " 次、備援模型 " + (t.fb || 0) + " 次" : "") + (lim ? "。每日上限 " + lim + " 次，約剩 " + Math.max(0, lim - t.ok - t.err) + " 次" : "");
     const days = Object.keys(u).sort().reverse().slice(0, 7);
-    $("#aiHist").textContent = days.length ? days.map((d) => d + "　成功 " + u[d].ok + "、失敗 " + u[d].err + "、" + nf(u[d].tot) + " tokens　" + Object.keys(u[d].m || {}).map((x) => x + "×" + u[d].m[x].ok).join("、")).join("\n") : "還沒有紀錄。";
+    $("#aiHist").textContent = days.length ? days.map((d) => d + "　成功 " + u[d].ok + "、失敗 " + u[d].err + "、" + nf(u[d].tot) + " tokens　" + Object.keys(u[d].m || {}).map((x) => x + "×" + u[d].m[x].ok).join("、") + (u[d].zoom ? "；二次放大×" + u[d].zoom : "") + (u[d].fb ? "；備援×" + u[d].fb : "")).join("\n") : "還沒有紀錄。";
     const ok7 = days.reduce((s, d) => s + u[d].ok, 0), tok7 = days.reduce((s, d) => s + u[d].tot, 0), avg = ok7 ? Math.round(tok7 / ok7) : 0;
-    const n = (typeof pages !== "undefined" ? pages : []).filter((r) => !r.aiDone && !r.skip).length, left = lim ? lim - t.ok - t.err : null;
-    $("#aiEst").textContent = !n ? "" : "這批還有 " + n + " 頁沒用 AI 讀：預計送出約 " + n + " 次請求" + (avg ? "、約 " + nf(n * avg) + " tokens（以近 7 天每次平均 " + nf(avg) + " 計）" : "") + "，依每分鐘 " + AI.rpm + " 次至少約需 " + Math.ceil(n / Math.max(1, AI.rpm)) + " 分鐘。" + (left == null ? "" : n > left ? "⚠ 超過今天剩下的約 " + Math.max(0, left) + " 次，可能讀不完；可以改用「只用本機辨識」或分到明天。" : "今天的額度夠用。");
+    const zm7 = days.reduce((s, d) => s + (u[d].zoom || 0), 0), ratio = AI.zoom && ok7 - zm7 >= 10 ? zm7 / (ok7 - zm7) : 0;   /* 近 7 天，每讀一頁平均多出幾次二次放大 */
+    const n = (typeof pages !== "undefined" ? pages : []).filter((r) => !r.aiDone && !r.skip).length, req = Math.ceil(n * (1 + ratio)), left = lim ? lim - t.ok - t.err : null;
+    $("#aiEst").textContent = !n ? "" : "這批還有 " + n + " 頁沒用 AI 讀：預計送出約 " + req + " 次請求" + (ratio > 0 ? "（每頁 1 次，加上二次放大約 " + (req - n) + " 次，依近 7 天的比例估算）" : AI.zoom ? "（每頁 1 次；二次放大只在讀不出承辦人的頁面多 1 次，還沒有足夠紀錄可估，實際會略多）" : "") + (avg ? "、約 " + nf(req * avg) + " tokens（以近 7 天每次平均 " + nf(avg) + " 計）" : "") + "，依每分鐘 " + AI.rpm + " 次至少約需 " + Math.ceil(req / Math.max(1, AI.rpm)) + " 分鐘。" + (left == null ? "" : req > left ? "⚠ 超過今天剩下的約 " + Math.max(0, left) + " 次，可能讀不完；可以改用「只用本機辨識」或分到明天。" : "今天的額度夠用。");
   }
   function aiUi() {
     aiVis(); useUi();
@@ -1141,7 +1149,7 @@
       return;
     } finally { c.width = c.height = 1; }
     aiStat.tok += (js2.usageMetadata && js2.usageMetadata.totalTokenCount) || 0;
-    (rec.aiModels = rec.aiModels || []).push(js2._model);
+    (rec.aiModels = rec.aiModels || []).push(js2._model); useBump("zoom");
     let j2; try { j2 = aiJson(aiText(js2)); } catch (e) { j._zoom = "放大重讀的回覆無法解析"; return; }
     if (!j2 || typeof j2 !== "object" || Array.isArray(j2)) return;
     const p2 = rosterPick(j2.who, j2.who_raw, j2.who_candidates), raw2 = aiS(j2.who_raw);
