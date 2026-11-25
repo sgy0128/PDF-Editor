@@ -218,6 +218,7 @@
         </label>
         <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" id="aiZoom">承辦人第一次讀不出來時，自動把手寫處放大再讀一次（只有不確定的頁面會多用 1 次請求）</label></div>
       </div>
+      <label class="chk"><input type="checkbox" id="aiSchema">使用 Gemini 的固定回傳格式（預設關閉；開啟後 JSON 格式更穩，但如果發現框出來的位置變不準，請維持關閉）</label>
       <div class="two">
         <label class="f">每分鐘最多送幾頁（免費額度有限，被擋時會自動等待重試）
           <input id="aiRpm" type="text" inputmode="numeric" spellcheck="false" placeholder="5">
@@ -504,8 +505,8 @@
   }
   /* 條碼位置會因表單版型落在左下或右下；雙側掃描並用條碼列密度選出位置 */
   /* 條碼若跨出搜尋範圍（掃描位置偏移），沿著條碼那一排把左右邊界延伸到條碼真正的邊緣。只會加寬、不會縮小 */
-  function widenBar(col, bh, x0, x1) {
-    const w = col.length, gt = Math.max(8, Math.round(0.008 * w)), pad = Math.round(0.01 * w), groups = [];
+  function barGroup(col, bh, x0, x1) {   /* 找出和搜尋範圍重疊、直條最多的那一組，就是條碼本體的左右邊界 */
+    const w = col.length, gt = Math.max(8, Math.round(0.008 * w)), groups = [];
     let s = -1, last = -1, cnt = 0;
     for (let x = 0; x < w; x++) {
       if (col[x] >= 0.5 * bh) {
@@ -516,7 +517,11 @@
     if (s >= 0) groups.push({ s, e: last, cnt });
     let g = null;
     for (const q of groups) if (q.e >= x0 && q.s <= x1 && (!g || q.cnt > g.cnt)) g = q;
-    if (!g || g.cnt < 20) return [x0, x1];
+    return g && g.cnt >= 20 ? g : null;
+  }
+  function widenBar(col, bh, x0, x1) {
+    const w = col.length, pad = Math.round(0.01 * w), g = barGroup(col, bh, x0, x1);
+    if (!g) return [x0, x1];
     return [Math.max(Math.max(0, x0 - Math.round(0.15 * w)), Math.min(x0, g.s - pad)), Math.min(Math.min(w, x1 + Math.round(0.10 * w)), Math.max(x1, g.e + pad))];
   }
   /* 裁切圖裡「真的有字」的比例（不算整條的黑邊、表格線）；太低代表裁到空白處 */
@@ -564,11 +569,11 @@
     }
     if (!best) return null;
     const { x0, rows, active, br } = best;
-    let ex0 = x0, erw = best.rw;
+    let ex0 = x0, erw = best.rw, barG = null;
     try {
       const bh = br[1] - br[0] + 1, dd = c.getContext("2d").getImageData(0, best.y0 + br[0], c.width, bh).data, col = new Int32Array(c.width);
       for (let y = 0; y < bh; y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; if (dd[i] * 0.299 + dd[i + 1] * 0.587 + dd[i + 2] * 0.114 < 150) col[x]++; }
-      const wd = widenBar(col, bh, x0, x0 + best.rw); ex0 = wd[0]; erw = wd[1] - wd[0];
+      const wd = widenBar(col, bh, x0, x0 + best.rw); ex0 = wd[0]; erw = wd[1] - wd[0]; barG = barGroup(col, bh, x0, x0 + best.rw);
     } catch (e) {}
     const unit = h / 3508;
     const textThr = Math.max(2, Math.floor(0.012 * active));
@@ -595,6 +600,7 @@
       const top = best.y0 + br[1] + 2;
       res.num = [ex0, top, erw, Math.max(1, Math.min(Math.round(85 * unit), h - top))];
     }
+    if (barG) { const yt = res.date[1], yb = res.num[1] + res.num[3], pd = Math.round(0.01 * c.width); res.sticker = [Math.max(0, barG.s - pd), yt, barG.e - barG.s + 1 + 2 * pd, Math.max(1, yb - yt)]; }   /* 收文貼紙（日期＋條碼＋數字）的範圍 */
     return res;
   }
   /* 便條紙（黃橙色）偵測 */
@@ -793,6 +799,10 @@
   }
   /* 讀單子上方的標題：刑案呈報單（有犯嫌）／陳報單，以及「○○派出所」 */
   const STN_LETTER = { 土城: "O", 廣福: "P", 清水: "Q", 金城: "M", 頂埔: "R", 交通: "9" };
+  /* 標題的派出所只能用來修正「長得像」的代號（O／P／Q／R／9 之間）或不合法的字；案號上已經讀到另一個合法代號（例如 M）時，
+     不能被標題蓋掉（土城／金城這類字也容易讀錯），改成提醒核對 */
+  const stnClose = (a, b) => a === b || "OPQR9".includes(a) && "OPQR9".includes(b);
+  const stnMayFix = (old, ttl) => stnClose(old, ttl) || !"OPQMR9".includes(old);
   async function ocrHeader(full) {
     const w = await ensureChi();
     const band = cropC(full, 0.05, 0.02, 0.97, 0.45, 1);  /* 含呈報單的「查獲地點（○○派出所）」 */
@@ -858,7 +868,9 @@
         const hd = await ocrHeader(full);
         if (hd.kind && !rec.touched.type) rec.type = hd.kind;
         if (hd.stn && !rec.touched.code && rec.code.length === 15 && rec.code[10] === hd.stn) rec.codeSoft = rec.codeSoft.replace(/派出所代號 O 和 9[^。]*。 ?/, "");
-        if (hd.stn && !rec.touched.code && rec.code.length === 15 && rec.code[10] !== hd.stn) {
+        if (hd.stn && !rec.touched.code && rec.code.length === 15 && rec.code[10] !== hd.stn && !stnMayFix(rec.code[10], hd.stn)) {
+          rec.codeFlags = (rec.codeFlags || []).concat("案號上的派出所代號是 " + rec.code[10] + "，但單子標題的派出所對應 " + hd.stn + "（沒有自動改），請對照圖片");
+        } else if (hd.stn && !rec.touched.code && rec.code.length === 15 && rec.code[10] !== hd.stn) {
           const old = rec.code[10]; rec.code = rec.code.slice(0, 10) + hd.stn + rec.code.slice(11);
           rec.codeSoft = "派出所代號依單子標題「" + hd.name + (hd.name === "交通" ? "分隊" : "派出所") + "」由 " + old + " 改成 " + hd.stn + "。" + (rec.codeSoft ? " " + rec.codeSoft : "");
         }
@@ -910,7 +922,7 @@
   const DESTS_L = DESTS.slice().sort((a, b) => b.length - a.length), tn = (t) => String(t).replace(/臺/g, "台");
   const destFind = (t) => DESTS_L.find((x) => tn(t).includes(tn(x))) || "";   /* 「南投信義」要比「信義」優先；臺／台視為相同 */
   { const dl = $("#destList"); if (dl) dl.innerHTML = DESTS.map((d) => '<option value="' + d + '">').join(""); }   /* 轉往分局的輸入提示 */
-  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", model2: "gemini-3.8-flash", zoom: true, rpm: 5, only: false, rpd: 0 };
+  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", model2: "gemini-3.8-flash", zoom: true, schema: false, rpm: 5, only: false, rpd: 0 };
   const aiStat = { ok: 0, err: 0, tok: 0 };
   let aiLast = 0, aiStop = false, aiBusy = false, aiFatal = "";
   let aiSwitched = "", aiSchemaOff = false;   /* aiSwitched：主模型今天額度用完後，這次作業改用的備援模型；aiSchemaOff：模型不接受固定格式時，改回原本的做法 */
@@ -977,18 +989,18 @@
     AI.on = $("#aiOn").checked; AI.key = $("#aiKey").value.trim();
     AI.model = ($("#aiModel").value.trim() || "gemini-3.5-flash-lite").replace(/^models\//, "");
     const n = parseInt($("#aiRpm").value, 10); AI.rpm = n > 0 ? Math.min(n, 300) : 5; AI.only = $("#aiOnly").checked; AI.rpd = Math.max(0, parseInt($("#aiRpd").value, 10) || 0);
-    AI.model2 = $("#aiModel2").value.trim().replace(/^models\//, ""); AI.zoom = $("#aiZoom").checked; aiSwitched = ""; aiSchemaOff = false;
+    AI.model2 = $("#aiModel2").value.trim().replace(/^models\//, ""); AI.zoom = $("#aiZoom").checked; AI.schema = $("#aiSchema").checked; aiSwitched = ""; aiSchemaOff = false;
     aiFatal = ""; lsSet(KEY_AI, JSON.stringify(AI)); $("#aiOpts").hidden = !AI.on; aiUi();
   }
   function aiLoad() {
     try { const s = JSON.parse(lsGet(KEY_AI) || "null"); if (s && typeof s === "object") Object.assign(AI, s); } catch (e) {}
     AI.key = String(AI.key || ""); AI.model = String(AI.model || "gemini-3.5-flash-lite").replace(/^models\//, ""); AI.rpm = +AI.rpm > 0 ? +AI.rpm : 5;
     $("#aiOn").checked = !!AI.on; $("#aiKey").value = AI.key; $("#aiModel").value = AI.model; $("#aiRpm").value = AI.rpm; $("#aiOnly").checked = !!AI.only; $("#aiRpd").value = AI.rpd > 0 ? AI.rpd : "";
-    AI.model2 = String(AI.model2 == null ? "" : AI.model2).replace(/^models\//, ""); $("#aiModel2").value = AI.model2; $("#aiZoom").checked = AI.zoom !== false;
+    AI.model2 = String(AI.model2 == null ? "" : AI.model2).replace(/^models\//, ""); $("#aiModel2").value = AI.model2; $("#aiZoom").checked = AI.zoom !== false; $("#aiSchema").checked = !!AI.schema;
     $("#aiOpts").hidden = !AI.on; aiUi();
   }
   ["aiKey", "aiModel", "aiModel2", "aiRpm", "aiRpd"].forEach((id) => $("#" + id).addEventListener("input", aiSave));
-  ["aiOn", "aiOnly", "aiZoom"].forEach((id) => $("#" + id).addEventListener("change", aiSave));
+  ["aiOn", "aiOnly", "aiZoom", "aiSchema"].forEach((id) => $("#" + id).addEventListener("change", aiSave));
 
   /* 限速：兩次送出之間至少隔 60 秒 / 每分鐘頁數；等待時可以按停止 */
   async function waitMsg(ms, label) {
@@ -1073,11 +1085,19 @@
   /* 送給 AI 的圖：整頁、案號區、手寫承辦人、便條紙、文號、日期 */
   const aiShot = (full, x0, y0, x1, y1, maxW) => cropC(full, x0, y0, x1, y1, Math.min(1, maxW / (full.width * (x1 - x0))));
   const aiShotPx = (full, r, maxW) => cropPx(full, r[0], r[1], r[2], r[3], Math.min(1, maxW / r[2]));
+  /* 收文貼紙的條碼與數字常常延伸到右下邊緣，AI 會把印刷的數字誤當成手寫字；送出前把它塗白（只塗送給 AI 的這張，不動原圖） */
+  function maskSticker(c, full, r) {
+    const sx = Math.floor(full.width * 0.80), sy = Math.floor(full.height * 0.62), k = c.width / Math.max(1, Math.ceil(full.width * 0.20));
+    if (r[0] + r[2] <= sx || r[1] + r[3] <= sy) return;
+    const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect((r[0] - sx) * k, (r[1] - sy) * k, r[2] * k, r[3] * k);
+  }
   function aiShots(full, st, bt) {
     const L = [];
     L.push({ tag: "page", label: "整頁（縮小，用來判斷單子種類與有沒有便條紙）", c: aiShot(full, 0, 0, 1, 1, 1500) });
     L.push({ tag: "top", label: "頁面上緣右側（E化案號與標題所在處）", c: aiShot(full, 0.24, 0, 1, 0.27, 1600) });
-    L.push({ tag: "strip", label: "頁面右下邊緣（手寫承辦人姓名處）", c: aiShot(full, 0.80, 0.62, 1, 1, 1600) });
+    const stripC = aiShot(full, 0.80, 0.62, 1, 1, 1600);
+    if (bt && bt.sticker) maskSticker(stripC, full, bt.sticker);
+    L.push({ tag: "strip", label: "頁面右下邊緣（手寫承辦人姓名處）", c: stripC });
     if (st) L.push({ tag: "sticky", label: "偵測到的便條紙（上面可能有實際承辦人姓名）", c: cropPx(full, st[0] - 10, st[1] - 10, st[2] + 20, st[3] + 20, Math.min(1.5, 900 / (st[2] + 20))) });
     if (bt && bt.num) L.push({ tag: "num", label: "收文條碼下方的文號數字", c: aiShotPx(full, bt.num, 1200) });
     if (bt && bt.date) L.push({ tag: "date", label: "收文貼紙上的日期", c: aiShotPx(full, bt.date, 1200) });
@@ -1141,7 +1161,7 @@
       "如果寫的是轉往的分局名稱而不是人名，who 回空字串，who_raw 照抄。\n\n名單：" + roster.join("、");
     let js2;
     try {
-      js2 = await callGemini([{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: url(c, 0.92).split(",")[1] } }], AI_ZOOM_SCHEMA);
+      js2 = await callGemini([{ text: prompt }, { inline_data: { mime_type: "image/jpeg", data: url(c, 0.92).split(",")[1] } }], AI.schema ? AI_ZOOM_SCHEMA : null);
     } catch (e) {
       const m = e && e.message ? e.message : String(e);
       if (e && e.fatal) { aiFatal = m; show("AI 已暫停：" + m, "warn"); }
@@ -1168,7 +1188,7 @@
     try {
       const parts = [{ text: aiPrompt(shots, rec.whoHint) }];
       shots.forEach((x, i) => { parts.push({ text: "圖" + (i + 1) + "：" + x.label }); parts.push({ inline_data: { mime_type: "image/jpeg", data: url(x.c, 0.85).split(",")[1] } }); });
-      const js = await callGemini(parts, AI_SCHEMA);
+      const js = await callGemini(parts, AI.schema ? AI_SCHEMA : null);
       rec.aiModels = [js._model];
       aiStat.tok += (js.usageMetadata && js.usageMetadata.totalTokenCount) || 0;
       const j = aiJson(aiText(js));
@@ -1179,8 +1199,8 @@
         const b = j.code_box, ok = Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === "number" && n >= 0 && n <= 1000) && b[2] > b[0] + 5 && b[3] > b[1] + 5 && (b[3] - b[1]) * top.c.width >= 2.2 * (b[2] - b[0]) * top.c.height;
         if (ok) {
           const x0 = Math.max(0, b[1] / 1000 - 0.03), x1 = Math.min(1, b[3] / 1000 + 0.03);
-          let y0 = b[0] / 1000 - 0.05, y1 = b[2] / 1000 + 0.05;
-          if (y1 - y0 < 0.14) { const m = (y0 + y1) / 2; y0 = m - 0.07; y1 = m + 0.07; }
+          let y0 = b[0] / 1000 - 0.08, y1 = b[2] / 1000 + 0.08;
+          if (y1 - y0 < 0.24) { const m = (y0 + y1) / 2; y0 = m - 0.12; y1 = m + 0.12; }
           y0 = Math.max(0, y0); y1 = Math.min(1, y1);
           const c = cropC(top.c, x0, y0, x1, y1, Math.min(2, 800 / Math.max(1, top.c.width * (x1 - x0))));
           rec.codeImg = url(c, 0.9); rec.codeImgFb = false; c.width = c.height = 1;
@@ -1233,7 +1253,11 @@
     if (!T.code && ac) {
       const had = rec.code.length === 15 ? rec.code : "";
       let cand = ac.code, flags = ac.flags.slice(), soft = ac.soft || "", fromAi = true;
-      if (stn && cand[10] !== stn) { const old = cand[10]; cand = cand.slice(0, 10) + stn + cand.slice(11); soft = "派出所代號依單子標題由 " + old + " 改成 " + stn + "。" + (soft ? " " + soft : ""); }
+      if (stn && cand[10] !== stn) {
+        const old = cand[10];
+        if (stnMayFix(old, stn)) { cand = cand.slice(0, 10) + stn + cand.slice(11); soft = "派出所代號依單子標題由 " + old + " 改成 " + stn + "。" + (soft ? " " + soft : ""); }
+        else flags.push("案號上的派出所代號是 " + old + "，但單子標題的派出所對應 " + stn + "（沒有自動改），請對照圖片");
+      }
       if (!(had && had === cand)) {
         if (had) {
           /* 預設以 AI 為準：和本機辨識不同時一律採用 AI，本機讀到的列在提醒裡供核對 */
