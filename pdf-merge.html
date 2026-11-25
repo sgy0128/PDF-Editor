@@ -127,6 +127,7 @@
   <div class="merge">
     <input id="outName" type="text" aria-label="輸出檔名" spellcheck="false">
     <label class="opt"><input type="checkbox" id="even" checked>補足偶數頁</label>
+    <label class="opt" title="每個 PDF 只取第一頁，其餘頁面略過"><input type="checkbox" id="firstOnly">每個檔案僅取第一面</label>
     <button class="primary" id="go" disabled>合併並下載</button>
   </div>
   <div id="msg" role="status"></div>
@@ -268,7 +269,20 @@
     return 0;
   }
 
-  function validRange(it) { try { parseRange(it.range, it.pages); return true; } catch (e) { return false; } }
+  function firstOnly() { return $("#firstOnly").checked; }
+  /* 實際要取的頁面（0 起算）：勾選「僅取第一面」時一律只取第 1 頁 */
+  function idxOf(it) { return firstOnly() ? [0] : parseRange(it.range, it.pages); }
+  function validRange(it) { if (firstOnly()) return true; try { parseRange(it.range, it.pages); return true; } catch (e) { return false; } }
+  function updateTotal() {
+    var total = 0;
+    items.forEach(function (it) { try { total += idxOf(it).length; } catch (e) {} });
+    $("#total").textContent = items.length + " 個檔案 · 合計 " + total + " 頁";
+  }
+  function syncFirstOnly() {
+    var f = firstOnly();
+    $("#even").disabled = f;
+    $("#even").closest("label").style.opacity = f ? ".45" : "";
+  }
 
   function render() {
     list.innerHTML = items.map(function (it, i) {
@@ -277,16 +291,14 @@
         '<span class="idx">' + (i + 1) + '</span>' +
         '<div class="info"><div class="name" title="' + esc(it.name) + '">' + esc(it.name) + '</div>' +
         '<div class="meta">' + (it.kind === "img" ? "圖片" : it.pages + " 頁") + ' · ' + size(it.size) + (it.raster ? ' · 加密檔，將以圖片方式合併' : '') + '</div></div>' +
-        (it.kind === "pdf" ? '<input class="range' + (validRange(it) ? "" : " bad") + '" data-act="range" placeholder="頁碼：全部" value="' + esc(it.range) + '" aria-label="頁碼範圍">' : "") +
+        (it.kind === "pdf" ? '<input class="range' + (validRange(it) ? "" : " bad") + '" data-act="range"' + (firstOnly() ? ' disabled placeholder="僅第 1 頁"' : ' placeholder="頁碼：全部"') + ' value="' + esc(it.range) + '" aria-label="頁碼範圍">' : "") +
         '<button data-act="up" aria-label="上移"' + (i === 0 ? " disabled" : "") + '>↑</button>' +
         '<button data-act="down" aria-label="下移"' + (i === items.length - 1 ? " disabled" : "") + '>↓</button>' +
         '<button data-act="del" aria-label="移除">✕</button></li>';
     }).join("");
     $("#tools").hidden = !items.length;
     $("#go").disabled = !items.length;
-    var total = 0;
-    items.forEach(function (it) { try { total += parseRange(it.range, it.pages).length; } catch (e) {} });
-    $("#total").textContent = items.length + " 個檔案 · 合計 " + total + " 頁";
+    updateTotal();
   }
 
   function find(el) {
@@ -307,9 +319,7 @@
     if (e.target.dataset.act !== "range") return;
     var i = find(e.target); items[i].range = e.target.value;
     e.target.classList.toggle("bad", !validRange(items[i]));
-    var total = 0;
-    items.forEach(function (it) { try { total += parseRange(it.range, it.pages).length; } catch (x) {} });
-    $("#total").textContent = items.length + " 個檔案 · 合計 " + total + " 頁";
+    updateTotal();
   });
 
   var dragId = null;
@@ -393,10 +403,10 @@
   $("#go").addEventListener("click", async function () {
     var btn = this; hide();
     try {
-      var jobs = items.map(function (it) { return { it: it, idx: parseRange(it.range, it.pages) }; });
+      var jobs = items.map(function (it) { return { it: it, idx: idxOf(it) }; });
       btn.disabled = true; btn.textContent = "合併中…";
       var out = await PDFLib.PDFDocument.create();
-      var evenPad = $("#even").checked, blanks = 0;
+      var evenPad = $("#even").checked && !firstOnly(), blanks = 0;
       for (var j of jobs) {
         var it = j.it;
         if (it.raster) {
@@ -430,6 +440,12 @@
   });
 
   try { var ev = localStorage.getItem("pdf-merge-even"); if (ev !== null) $("#even").checked = ev === "1"; } catch (e) {}
+  try { if (localStorage.getItem("pdf-merge-first") === "1") $("#firstOnly").checked = true; } catch (e) {}
+  syncFirstOnly();
+  $("#firstOnly").addEventListener("change", function () {
+    try { localStorage.setItem("pdf-merge-first", this.checked ? "1" : "0"); } catch (e) {}
+    syncFirstOnly(); render();
+  });
   $("#even").addEventListener("change", function () { try { localStorage.setItem("pdf-merge-even", this.checked ? "1" : "0"); } catch (e) {} });
   if (!window.PDFLib) show("無法載入 PDF 處理元件，請確認網路連線後重新整理頁面。", true);
   render();
