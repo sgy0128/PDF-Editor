@@ -500,6 +500,33 @@
     return out;
   }
   /* 條碼位置會因表單版型落在左下或右下；雙側掃描並用條碼列密度選出位置 */
+  /* 條碼若跨出搜尋範圍（掃描位置偏移），沿著條碼那一排把左右邊界延伸到條碼真正的邊緣。只會加寬、不會縮小 */
+  function widenBar(col, bh, x0, x1) {
+    const w = col.length, gt = Math.max(8, Math.round(0.008 * w)), pad = Math.round(0.01 * w), groups = [];
+    let s = -1, last = -1, cnt = 0;
+    for (let x = 0; x < w; x++) {
+      if (col[x] >= 0.5 * bh) {
+        if (s >= 0 && x - last > gt) { groups.push({ s, e: last, cnt }); s = -1; cnt = 0; }
+        if (s < 0) s = x; last = x; cnt++;
+      }
+    }
+    if (s >= 0) groups.push({ s, e: last, cnt });
+    let g = null;
+    for (const q of groups) if (q.e >= x0 && q.s <= x1 && (!g || q.cnt > g.cnt)) g = q;
+    if (!g || g.cnt < 20) return [x0, x1];
+    return [Math.max(Math.max(0, x0 - Math.round(0.15 * w)), Math.min(x0, g.s - pad)), Math.min(Math.min(w, x1 + Math.round(0.10 * w)), Math.max(x1, g.e + pad))];
+  }
+  /* 裁切圖裡「真的有字」的比例（不算整條的黑邊、表格線）；太低代表裁到空白處 */
+  function inkRatio(cv) {
+    try {
+      const w = cv.width, h = cv.height, d = cv.getContext("2d").getImageData(0, 0, w, h).data, colN = new Int32Array(w), rowN = new Int32Array(h);
+      const dark = (i) => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 < 140;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (dark((y * w + x) * 4)) { colN[x]++; rowN[y]++; }
+      let n = 0;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (dark((y * w + x) * 4) && colN[x] <= 0.6 * h && rowN[y] <= 0.6 * w) n++;
+      return n / Math.max(1, w * h);
+    } catch (e) { return 1; }
+  }
   function analyzeBottom(c) {
     const w = c.width, h = c.height, y0 = Math.floor(h * 0.62), rh = h - y0;
     if (w < 100 || rh < 60) return null;
@@ -533,7 +560,13 @@
       }
     }
     if (!best) return null;
-    const { x0, rw, rows, active, br } = best;
+    const { x0, rows, active, br } = best;
+    let ex0 = x0, erw = best.rw;
+    try {
+      const bh = br[1] - br[0] + 1, dd = c.getContext("2d").getImageData(0, best.y0 + br[0], c.width, bh).data, col = new Int32Array(c.width);
+      for (let y = 0; y < bh; y++) for (let x = 0; x < c.width; x++) { const i = (y * c.width + x) * 4; if (dd[i] * 0.299 + dd[i + 1] * 0.587 + dd[i + 2] * 0.114 < 150) col[x]++; }
+      const wd = widenBar(col, bh, x0, x0 + best.rw); ex0 = wd[0]; erw = wd[1] - wd[0];
+    } catch (e) {}
     const unit = h / 3508;
     const textThr = Math.max(2, Math.floor(0.012 * active));
     const above = runs(Array.from(rows.slice(0, br[0])), textThr, 4)
@@ -545,19 +578,19 @@
     if (above.length) {
       const r = above[above.length - 1];
       const top = Math.max(r[0], r[1] - Math.round(70 * unit));
-      res.date = [x0, best.y0 + top - 4, rw, Math.max(1, r[1] - top + 12)];
+      res.date = [ex0, best.y0 + top - 4, erw, Math.max(1, r[1] - top + 12)];
     } else {
       const top = Math.max(0, br[0] - Math.round(78 * unit));
-      res.date = [x0, best.y0 + top, rw, Math.max(1, br[0] - top - 2)];
+      res.date = [ex0, best.y0 + top, erw, Math.max(1, br[0] - top - 2)];
     }
     if (below.length) {
       const r = below[0];
-      res.num = [x0, best.y0 + Math.max(br[1] + 1, r[0] - 3), rw,
+      res.num = [ex0, best.y0 + Math.max(br[1] + 1, r[0] - 3), erw,
         Math.max(1, r[1] - r[0] + 12)];
     } else {
       /* 數字列很淡時投影可能抓不到，仍提供條碼下方區塊讓 OCR 嘗試 */
       const top = best.y0 + br[1] + 2;
-      res.num = [x0, top, rw, Math.max(1, Math.min(Math.round(85 * unit), h - top))];
+      res.num = [ex0, top, erw, Math.max(1, Math.min(Math.round(85 * unit), h - top))];
     }
     return res;
   }
@@ -1087,9 +1120,12 @@
     if (y1 - y0 < 0.08) { const m = (y0 + y1) / 2; y0 = m - 0.04; y1 = m + 0.04; }
     x0 = Math.max(0, x0); x1 = Math.min(1, x1); y0 = Math.max(0, y0); y1 = Math.min(1, y1);
     const sc = Math.max(1, Math.min(3, 1000 / Math.max(1, strip.width * (x1 - x0)), 1400 / Math.max(1, strip.height * (y1 - y0))));
-    const c = cropC(strip, x0, y0, x1, y1, sc);
+    let c = cropC(strip, x0, y0, x1, y1, sc);
+    if (c.width >= 20 && c.height >= 20 && inkRatio(c) < 0.002) {   /* AI 框的位置裁到空白處：改送右下邊緣右側大半（含手寫處與少量印刷字） */
+      c.width = c.height = 1; c = cropC(strip, 0.40, 0, 1, 1, Math.max(1, Math.min(2, 2400 / Math.max(1, strip.height))));
+    }
     if (c.width < 20 || c.height < 20) { c.width = c.height = 1; return; }
-    const prompt = "這是一張放大的手寫字截圖，出自台灣派出所「陳報單」或「刑案呈報單」右下邊緣的承辦人簽名處。可能只寫了姓名中的一兩個字，也可能是潦草的簽名。\n" +
+    const prompt = "這是一張放大的手寫字截圖，出自台灣派出所「陳報單」或「刑案呈報單」右下邊緣的承辦人簽名處。可能只寫了姓名中的一兩個字，也可能是潦草的簽名。圖上若還有印刷的表格文字，請忽略，只讀手寫的字。\n" +
       "請只回傳一個 JSON 物件，不要其他文字：\n{\n \"who_raw\": \"你實際看到的字，逐字照抄；完全看不出來就回空字串\",\n" +
       " \"who\": \"從下面的名單選出最像的一位，回名單上的全名；沒有把握就回空字串，不要猜\",\n" +
       " \"who_candidates\": [\"無法確定時，列出最多 3 位名單中可能的人；否則回空陣列\"],\n" +
@@ -1150,7 +1186,7 @@
         if (y1 - y0 < 0.12) { const m = (y0 + y1) / 2; y0 = m - 0.06; y1 = m + 0.06; }
         x0 = Math.max(0, x0); x1 = Math.min(1, x1); y0 = Math.max(0, y0); y1 = Math.min(1, y1);
         const c = cropC(sp.c, x0, y0, x1, y1, Math.min(2.5, 600 / Math.max(1, sp.c.width * (x1 - x0))));
-        if (c.width > 20 && c.height > 20) { rec.strip = url(c, 0.9); rec.showFull = false; }
+        if (c.width > 20 && c.height > 20 && inkRatio(c) >= 0.002) { rec.strip = url(c, 0.9); rec.showFull = false; }   /* 裁到空白處就不換圖，維持顯示完整右下角 */
         c.width = c.height = 1;
         await aiZoomWho(rec, j, sp.c, wb);
       }
