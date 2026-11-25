@@ -220,7 +220,7 @@
       </div>
       <label class="chk"><input type="checkbox" id="aiSchema">使用 Gemini 的固定回傳格式（預設關閉；開啟後 JSON 格式更穩，但如果發現框出來的位置變不準，請維持關閉）</label>
       <div class="two">
-        <label class="f">每分鐘最多送幾頁（免費額度有限，被擋時會自動等待重試）
+        <label class="f">每分鐘最多送幾頁（跟著上面的「模型名稱」走，每個模型各自記住；被擋時會自動等待重試）
           <input id="aiRpm" type="text" inputmode="numeric" spellcheck="false" placeholder="5">
         </label>
         <div style="display:flex;align-items:flex-end"><label class="chk"><input type="checkbox" id="aiOnly">只用 AI，略過本機英數辨識（較快，不用下載辨識引擎）</label></div>
@@ -241,7 +241,7 @@
         <div id="aiEst" class="hint"></div>
         <details><summary>最近 7 天</summary><div id="aiHist" class="hint" style="white-space:pre-line"></div></details>
         <div class="row" style="margin-top:8px">
-          <label class="f" style="margin:0;flex-direction:row;align-items:center;gap:8px">每日請求上限（選填；到 AI Studio 的「Rate limit」頁查這個模型的每日請求數）<input id="aiRpd" type="text" inputmode="numeric" spellcheck="false" style="width:90px" placeholder="例如 1000"></label>
+          <label class="f" style="margin:0;flex-direction:row;align-items:center;gap:8px">每日請求上限（跟著「模型名稱」走，每個模型各自記住；到 AI Studio 的「Rate limit」頁可查，用到 50%、90% 會提醒）<input id="aiRpd" type="text" inputmode="numeric" spellcheck="false" style="width:90px" placeholder="例如 1000"></label>
           <button id="aiUseClear" type="button">清除用量紀錄</button>
           <a class="lnkbtn" href="https://aistudio.google.com/rate-limit?timeRange=last-28-days&amp;project=gen-lang-client-0555782270" target="_blank" rel="noopener noreferrer">開啟 Google 的額度頁（Rate limit）↗</a>
         </div>
@@ -922,7 +922,17 @@
   const DESTS_L = DESTS.slice().sort((a, b) => b.length - a.length), tn = (t) => String(t).replace(/臺/g, "台");
   const destFind = (t) => DESTS_L.find((x) => tn(t).includes(tn(x))) || "";   /* 「南投信義」要比「信義」優先；臺／台視為相同 */
   { const dl = $("#destList"); if (dl) dl.innerHTML = DESTS.map((d) => '<option value="' + d + '">').join(""); }   /* 轉往分局的輸入提示 */
-  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", model2: "gemini-3.8-flash", zoom: true, schema: false, rpm: 5, only: false, rpd: 0 };
+  const AI = { on: false, key: "", model: "gemini-3.5-flash-lite", model2: "gemini-3.8-flash", zoom: true, schema: false, rpm: 5, only: false, rpd: 0, lim: {} };
+  /* 每個模型各自的限速：rpm＝每分鐘最多送幾次、rpd＝每日請求上限（0＝不限／不提醒）。你改過的值會記在 AI.lim，優先於預設 */
+  const LIM_DEF = { "gemini-3.5-flash-lite": { rpm: 12, rpd: 500 }, "gemini-3.8-flash": { rpm: 4, rpd: 20 } };   /* 3.8 Flash 官方上限是 5 次/分、20 次/天；預設留一點餘裕設 4 */
+  function limFor(model) {
+    const m = String(model || "").replace(/^models\//, ""), s = AI.lim && AI.lim[m], d = LIM_DEF[m] || { rpm: 5, rpd: 0 };
+    return { rpm: s && +s.rpm > 0 ? +s.rpm : d.rpm, rpd: s && +s.rpd >= 0 && s.rpd !== "" && s.rpd != null ? +s.rpd : d.rpd };
+  }
+  function syncLimInputs() {   /* 主模型換了：把該模型記住的數字帶進兩個欄位 */
+    const l = limFor(AI.model); AI.rpm = l.rpm; AI.rpd = l.rpd;
+    $("#aiRpm").value = l.rpm; $("#aiRpd").value = l.rpd > 0 ? l.rpd : "";
+  }
   const aiStat = { ok: 0, err: 0, tok: 0 };
   let aiLast = 0, aiStop = false, aiBusy = false, aiFatal = "";
   let aiSwitched = "", aiSchemaOff = false;   /* aiSwitched：主模型今天額度用完後，這次作業改用的備援模型；aiSchemaOff：模型不接受固定格式時，改回原本的做法 */
@@ -951,15 +961,28 @@
   const KEY_USE = "pdf-register-usage";
   const ptDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(new Date());
   const useLoad = () => { try { const o = JSON.parse(lsGet(KEY_USE) || "{}"); return o && typeof o === "object" && !Array.isArray(o) ? o : {}; } catch (e) { return {}; } };
+  /* 每日額度提醒：某個模型今天用到上限的 50%、90%、100% 時，各提醒一次 */
+  const quotaWarned = {};
+  function checkQuota(m) {
+    const lim = limFor(m).rpd; if (!(lim > 0)) return;
+    const t = useLoad()[ptDay()], mm = t && t.m && t.m[m]; if (!mm) return;
+    const used = (mm.ok || 0) + (mm.err || 0), k = ptDay() + "|" + m, lvl = used >= lim ? 3 : used >= 0.9 * lim ? 2 : used >= 0.5 * lim ? 1 : 0;
+    if (lvl <= (quotaWarned[k] || 0)) return;
+    quotaWarned[k] = lvl;
+    show(lvl === 3 ? "⚠ 模型 " + m + " 今天的 " + lim + " 次額度已經用完（這個瀏覽器的紀錄）。之後的請求很可能被擋，可改用備援模型或明天再讀。"
+      : lvl === 2 ? "⚠ 模型 " + m + " 今天已用 " + used + " / " + lim + " 次，快用完了。"
+      : "模型 " + m + " 今天已用 " + used + " / " + lim + " 次，超過一半了。", "warn");
+  }
   function useAdd(ok, js, model) {
     try {
       const u = useLoad(), k = ptDay(), t = u[k] || (u[k] = { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }), m = model || AI.model;
       if (ok && m !== AI.model) t.fb = (t.fb || 0) + 1;   /* 由備援模型讀的請求數 */
       const md = (js && js.usageMetadata) || {}, inp = md.promptTokenCount || 0, tot = md.totalTokenCount || 0, out = Math.max(0, tot - inp);
       if (ok) { t.ok++; t.inp += inp; t.out += out; t.tot += tot; } else t.err++;
-      const mm = t.m[m] || (t.m[m] = { ok: 0, tot: 0 }); if (ok) { mm.ok++; mm.tot += tot; }
+      const mm = t.m[m] || (t.m[m] = { ok: 0, tot: 0 }); if (ok) { mm.ok++; mm.tot += tot; } else mm.err = (mm.err || 0) + 1;
       Object.keys(u).sort().slice(0, Math.max(0, Object.keys(u).length - 14)).forEach((x) => delete u[x]);
       lsSet(KEY_USE, JSON.stringify(u));
+      checkQuota(m);
     } catch (e) {}
   }
   function useBump(key) {   /* 額外記一筆，例如 zoom＝二次放大 */
@@ -967,14 +990,15 @@
   }
   function useUi() {
     const el = $("#aiUse"); if (!el) return;
-    const u = useLoad(), k = ptDay(), t = u[k] || { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }, lim = +AI.rpd > 0 ? +AI.rpd : 0, nf = (n) => Number(n).toLocaleString();
-    el.textContent = "今天（太平洋時間 " + k + "，台灣約隔天下午 3～4 點重置）：成功 " + t.ok + " 次、失敗 " + t.err + " 次；共約 " + nf(t.tot) + " tokens（輸入 " + nf(t.inp) + "、輸出與思考 " + nf(t.out) + "）" + (t.zoom || t.fb ? "；其中二次放大 " + (t.zoom || 0) + " 次、備援模型 " + (t.fb || 0) + " 次" : "") + (lim ? "。每日上限 " + lim + " 次，約剩 " + Math.max(0, lim - t.ok - t.err) + " 次" : "");
+    const u = useLoad(), k = ptDay(), t = u[k] || { ok: 0, err: 0, inp: 0, out: 0, tot: 0, m: {} }, am = aiSwitched || AI.model, al = limFor(am), lim = al.rpd > 0 ? al.rpd : 0, nf = (n) => Number(n).toLocaleString();
+    const amm = (t.m && t.m[am]) || { ok: 0, err: 0 }, amUsed = (amm.ok || 0) + (amm.err || 0);   /* 上限是每個模型各自的，所以用該模型自己的次數算剩餘 */
+    el.textContent = "今天（太平洋時間 " + k + "，台灣約隔天下午 3～4 點重置）：成功 " + t.ok + " 次、失敗 " + t.err + " 次；共約 " + nf(t.tot) + " tokens（輸入 " + nf(t.inp) + "、輸出與思考 " + nf(t.out) + "）" + (t.zoom || t.fb ? "；其中二次放大 " + (t.zoom || 0) + " 次、備援模型 " + (t.fb || 0) + " 次" : "") + "。目前使用 " + am + "：已用 " + amUsed + " 次" + (lim ? "，每日上限 " + lim + " 次，約剩 " + Math.max(0, lim - amUsed) + " 次" : "（沒有設定每日上限）") + "，每分鐘最多 " + al.rpm + " 次";
     const days = Object.keys(u).sort().reverse().slice(0, 7);
     $("#aiHist").textContent = days.length ? days.map((d) => d + "　成功 " + u[d].ok + "、失敗 " + u[d].err + "、" + nf(u[d].tot) + " tokens　" + Object.keys(u[d].m || {}).map((x) => x + "×" + u[d].m[x].ok).join("、") + (u[d].zoom ? "；二次放大×" + u[d].zoom : "") + (u[d].fb ? "；備援×" + u[d].fb : "")).join("\n") : "還沒有紀錄。";
     const ok7 = days.reduce((s, d) => s + u[d].ok, 0), tok7 = days.reduce((s, d) => s + u[d].tot, 0), avg = ok7 ? Math.round(tok7 / ok7) : 0;
     const zm7 = days.reduce((s, d) => s + (u[d].zoom || 0), 0), ratio = AI.zoom && ok7 - zm7 >= 10 ? zm7 / (ok7 - zm7) : 0;   /* 近 7 天，每讀一頁平均多出幾次二次放大 */
-    const n = (typeof pages !== "undefined" ? pages : []).filter((r) => !r.aiDone && !r.skip).length, req = Math.ceil(n * (1 + ratio)), left = lim ? lim - t.ok - t.err : null;
-    $("#aiEst").textContent = !n ? "" : "這批還有 " + n + " 頁沒用 AI 讀：預計送出約 " + req + " 次請求" + (ratio > 0 ? "（每頁 1 次，加上二次放大約 " + (req - n) + " 次，依近 7 天的比例估算）" : AI.zoom ? "（每頁 1 次；二次放大只在讀不出承辦人的頁面多 1 次，還沒有足夠紀錄可估，實際會略多）" : "") + (avg ? "、約 " + nf(req * avg) + " tokens（以近 7 天每次平均 " + nf(avg) + " 計）" : "") + "，依每分鐘 " + AI.rpm + " 次至少約需 " + Math.ceil(req / Math.max(1, AI.rpm)) + " 分鐘。" + (left == null ? "" : req > left ? "⚠ 超過今天剩下的約 " + Math.max(0, left) + " 次，可能讀不完；可以改用「只用本機辨識」或分到明天。" : "今天的額度夠用。");
+    const n = (typeof pages !== "undefined" ? pages : []).filter((r) => !r.aiDone && !r.skip).length, req = Math.ceil(n * (1 + ratio)), left = lim ? lim - amUsed : null;
+    $("#aiEst").textContent = !n ? "" : "這批還有 " + n + " 頁沒用 AI 讀：預計送出約 " + req + " 次請求" + (ratio > 0 ? "（每頁 1 次，加上二次放大約 " + (req - n) + " 次，依近 7 天的比例估算）" : AI.zoom ? "（每頁 1 次；二次放大只在讀不出承辦人的頁面多 1 次，還沒有足夠紀錄可估，實際會略多）" : "") + (avg ? "、約 " + nf(req * avg) + " tokens（以近 7 天每次平均 " + nf(avg) + " 計）" : "") + "，依每分鐘 " + al.rpm + " 次至少約需 " + Math.ceil(req / Math.max(1, al.rpm)) + " 分鐘。" + (left == null ? "" : req > left ? "⚠ 超過今天剩下的約 " + Math.max(0, left) + " 次，可能讀不完；可以改用「只用本機辨識」或分到明天。" : "今天的額度夠用。");
   }
   function aiUi() {
     aiVis(); useUi();
@@ -984,23 +1008,37 @@
       : AI.key.length > 10 ? "已設定金鑰。加入 PDF 後會自動用 AI 讀取；也可以先按「測試連線」。"
       : "請貼上 API 金鑰（到 aistudio.google.com 按 Get API key 申請）。";
     if (aiSwitched && !aiFatal) el.textContent += "　主模型的額度用完了，目前改用備援模型 " + aiSwitched + "。";
+    if (AI.model2 && AI.model2 !== AI.model) { const l2 = limFor(AI.model2); el.textContent += "　備援模型 " + AI.model2 + "：每分鐘 " + l2.rpm + " 次、每日 " + (l2.rpd > 0 ? l2.rpd + " 次" : "不設上限") + "（把它換成主模型就能修改）。"; }
   }
-  function aiSave() {
+  /* src＝"limits" 代表是你改了「每分鐘」或「每日上限」欄位，才寫進該模型的紀錄；
+     改模型名稱時反過來，把那個模型記住的數字帶進欄位，不會把上一個模型的數字蓋過去 */
+  function aiSave(src) {
     AI.on = $("#aiOn").checked; AI.key = $("#aiKey").value.trim();
+    const prev = AI.model;
     AI.model = ($("#aiModel").value.trim() || "gemini-3.5-flash-lite").replace(/^models\//, "");
-    const n = parseInt($("#aiRpm").value, 10); AI.rpm = n > 0 ? Math.min(n, 300) : 5; AI.only = $("#aiOnly").checked; AI.rpd = Math.max(0, parseInt($("#aiRpd").value, 10) || 0);
+    AI.only = $("#aiOnly").checked;
+    if (src === "limits") {
+      const n = parseInt($("#aiRpm").value, 10), d = parseInt($("#aiRpd").value, 10);
+      AI.lim = AI.lim || {};
+      AI.lim[AI.model] = { rpm: n > 0 ? Math.min(n, 300) : limFor(AI.model).rpm, rpd: d > 0 ? d : 0 };
+      const l = limFor(AI.model); AI.rpm = l.rpm; AI.rpd = l.rpd;
+    } else if (AI.model !== prev) syncLimInputs();
     AI.model2 = $("#aiModel2").value.trim().replace(/^models\//, ""); AI.zoom = $("#aiZoom").checked; AI.schema = $("#aiSchema").checked; aiSwitched = ""; aiSchemaOff = false;
     aiFatal = ""; lsSet(KEY_AI, JSON.stringify(AI)); $("#aiOpts").hidden = !AI.on; aiUi();
   }
   function aiLoad() {
     try { const s = JSON.parse(lsGet(KEY_AI) || "null"); if (s && typeof s === "object") Object.assign(AI, s); } catch (e) {}
-    AI.key = String(AI.key || ""); AI.model = String(AI.model || "gemini-3.5-flash-lite").replace(/^models\//, ""); AI.rpm = +AI.rpm > 0 ? +AI.rpm : 5;
-    $("#aiOn").checked = !!AI.on; $("#aiKey").value = AI.key; $("#aiModel").value = AI.model; $("#aiRpm").value = AI.rpm; $("#aiOnly").checked = !!AI.only; $("#aiRpd").value = AI.rpd > 0 ? AI.rpd : "";
+    AI.key = String(AI.key || ""); AI.model = String(AI.model || "gemini-3.5-flash-lite").replace(/^models\//, "");
+    if (!AI.lim || typeof AI.lim !== "object" || Array.isArray(AI.lim)) AI.lim = {};
+    /* 舊版只有一組全域數字：換成每個模型各自的設定。已知的兩個模型用新預設，其他模型沿用舊的數字 */
+    if (!LIM_DEF[AI.model] && !AI.lim[AI.model] && (+AI.rpm > 0 || +AI.rpd > 0)) AI.lim[AI.model] = { rpm: +AI.rpm > 0 ? +AI.rpm : 5, rpd: +AI.rpd > 0 ? +AI.rpd : 0 };
+    $("#aiOn").checked = !!AI.on; $("#aiKey").value = AI.key; $("#aiModel").value = AI.model; $("#aiOnly").checked = !!AI.only; syncLimInputs();
     AI.model2 = String(AI.model2 == null ? "" : AI.model2).replace(/^models\//, ""); $("#aiModel2").value = AI.model2; $("#aiZoom").checked = AI.zoom !== false; $("#aiSchema").checked = !!AI.schema;
     $("#aiOpts").hidden = !AI.on; aiUi();
   }
-  ["aiKey", "aiModel", "aiModel2", "aiRpm", "aiRpd"].forEach((id) => $("#" + id).addEventListener("input", aiSave));
-  ["aiOn", "aiOnly", "aiZoom", "aiSchema"].forEach((id) => $("#" + id).addEventListener("change", aiSave));
+  ["aiKey", "aiModel", "aiModel2"].forEach((id) => $("#" + id).addEventListener("input", () => aiSave()));
+  ["aiRpm", "aiRpd"].forEach((id) => $("#" + id).addEventListener("input", () => aiSave("limits")));
+  ["aiOn", "aiOnly", "aiZoom", "aiSchema"].forEach((id) => $("#" + id).addEventListener("change", () => aiSave()));
 
   /* 限速：兩次送出之間至少隔 60 秒 / 每分鐘頁數；等待時可以按停止 */
   async function waitMsg(ms, label) {
@@ -1011,10 +1049,10 @@
       await sleep(Math.min(500, Math.max(50, end - Date.now())));
     }
   }
-  async function aiGate() {
+  async function aiGate(model) {   /* 依「這次要用的模型」自己的每分鐘上限限速，備援模型也一樣 */
     if (aiStop) throw new Error("已停止");
-    const wait = aiLast + 60000 / Math.max(1, AI.rpm) - Date.now();
-    if (wait > 0) await waitMsg(wait, "AI 限速等待（每分鐘最多 " + AI.rpm + " 次）");
+    const rpm = limFor(model || AI.model).rpm, wait = aiLast + 60000 / Math.max(1, rpm) - Date.now();
+    if (wait > 0) await waitMsg(wait, "AI 限速等待（" + (model || AI.model) + " 每分鐘最多 " + rpm + " 次）");
     aiLast = Date.now();
   }
   function retrySec(er) {
@@ -1042,7 +1080,7 @@
     const apiOf = () => "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent";
     const bodyOf = (sch) => JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: sch ? { temperature: 0, responseMimeType: "application/json", responseSchema: sch } : { temperature: 0, responseMimeType: "application/json" } });
     for (let a = 0; ; a++) {
-      await aiGate();
+      await aiGate(model);
       const useSchema = !!schema && !aiSchemaOff;
       let res, js; const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 150000);
       try {
